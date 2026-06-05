@@ -1,8 +1,33 @@
+[package]
+name = "zapret2-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Terminal UI for zapret2 — DPI bypass manager"
+
+[[bin]]
+name = "zapret2-tui"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+ctrlc.workspace = true
+tokio.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+zapret2-core.workspace = true
+chrono = "0.4.45"
+
 [workspace]
 resolver = "2"
 members = [
     "crates/zapret2-core",
-    "crates/zapret2-tui",
 ]
 
 [workspace.package]
@@ -27,6 +52,7 @@ ctrlc = "3"
 ratatui = "0.29"
 crossterm = "0.28"
 chrono = "0.4"
+zapret2-core = { path = "crates/zapret2-core" }
 
 [profile.release]
 lto = "thin"
