@@ -137,4 +137,13 @@ DESYNC_MARK=0x40000000
         assert_eq!(config.fwtype, FirewallType::Nftables);
         assert_eq!(config.desync_mark, 0x40000000);
     }
+
+    #[test]
+    fn test_parse_missing_config_returns_default() {
+        let result = ZapretConfig::load(Some(PathBuf::from("/nonexistent/config")));
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.qnum, 200);
+        assert_eq!(config.desync_mark, 0x40000000);
+    }
 }
