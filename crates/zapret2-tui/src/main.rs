@@ -1,6 +1,7 @@
 //! zapret2-tui — Terminal UI for zapret2
 
 use anyhow::Result;
+use clap::Parser;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -8,7 +9,7 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    Frame, Terminal,
+    Terminal,
 };
 use std::io::{self, stdout};
 use std::path::PathBuf;
@@ -19,19 +20,29 @@ mod ui;
 
 use app::App;
 
+/// Terminal UI for zapret2 DPI bypass
+#[derive(Parser)]
+#[command(name = "zapret2-tui")]
+#[command(version)]
+#[command(about, long_about = None)]
+struct Args {
+    /// Path to zapret2 config file
+    #[arg(short, long, value_name = "FILE")]
+    config: Option<PathBuf>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
+
     tracing_subscriber::fmt::init();
     info!("starting zapret2-tui");
 
     stdout().execute(EnterAlternateScreen)?;
     enable_raw_mode()?;
 
-    // Parse optional config path from args (can be extended with clap later)
-    let config_path = std::env::args().nth(1).map(PathBuf::from);
-    
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
-    let mut app = App::new(config_path)?;
+    let mut app = App::new(args.config)?;
 
     let result = run_app(&mut terminal, &mut app).await;
 
