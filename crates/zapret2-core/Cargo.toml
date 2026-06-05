@@ -1,0 +1,22 @@
+[package]
+name = "zapret2-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core library for managing zapret2 nfqws2 daemon and firewall rules"
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json.workspace = true
+toml.workspace = true
+which = "8.0.2"
+shell-words = "1.1.1"
+libc = "0.2.186"
+
+[dev-dependencies]
+tokio-test = "0.4"
