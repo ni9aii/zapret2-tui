@@ -93,3 +93,45 @@ impl ProfileManager {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod profile_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_profile_default() {
+        let p = Profile::default();
+        assert_eq!(p.name, "default");
+        assert_eq!(p.nfqws_opts, "--qnum=200");
+        assert!(!p.hostlists.is_empty());
+    }
+
+    #[test]
+    fn test_profile_manager_new() {
+        let tmp = TempDir::new().unwrap();
+        let pm = ProfileManager::new(tmp.path().to_path_buf());
+        assert!(pm.profiles.is_empty());
+    }
+
+    #[test]
+    fn test_profile_save_and_load() {
+        let tmp = TempDir::new().unwrap();
+        let mut pm = ProfileManager::new(tmp.path().to_path_buf());
+
+        let profile = Profile {
+            name: "test-profile".to_string(),
+            description: "Test".to_string(),
+            strategy: "test-strategy".to_string(),
+            hostlists: vec!["test.txt".to_string()],
+            nfqws_opts: "--qnum=300".to_string(),
+        };
+
+        pm.save_profile(&profile).unwrap();
+        pm.load().unwrap();
+
+        let loaded = pm.get("test-profile");
+        assert!(loaded.is_some());
+        assert!(loaded.unwrap().nfqws_opts.contains("--qnum=300"));
+    }
+}

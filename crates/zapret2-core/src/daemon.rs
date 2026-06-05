@@ -32,10 +32,19 @@ impl DaemonManager {
         #[cfg(unix)]
         {
             use std::fs;
+            // Note: PID file path should be configurable in future
             if let Ok(pid_str) = fs::read_to_string("/tmp/nfqws2.pid") {
                 if let Ok(pid) = pid_str.trim().parse::<i32>() {
+                    // Validate PID is reasonable (must be positive)
+                    if pid <= 0 {
+                        return false;
+                    }
+                    // kill(pid, 0) returns 0 on success, -1 on error with errno set
                     let result = unsafe { libc::kill(pid, 0) };
-                    return result == 0;
+                    if result == 0 {
+                        return true;
+                    }
+                    // kill returned -1 with errno (ESRCH=no such process, etc.)
                 }
             }
             false

@@ -121,8 +121,7 @@ table inet {table} {{
     }
 
     async fn run_nft(&self, script: &str) -> Result<()> {
-        let _ = script; // TODO: implement stdin input
-        let output = Command::new("nft")
+        let mut child = Command::new("nft")
             .arg("-f")
             .arg("-")
             .stdin(Stdio::piped())
@@ -130,7 +129,17 @@ table inet {table} {{
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn()
-            .map_err(|e| ZapretError::FirewallError(format!("failed to spawn nft: {}", e)))?
+            .map_err(|e| ZapretError::FirewallError(format!("failed to spawn nft: {}", e)))?;
+
+        // Write script to stdin
+        if let Some(mut stdin) = child.stdin.take() {
+            use tokio::io::AsyncWriteExt;
+            stdin.write_all(script.as_bytes()).await.map_err(|e| {
+                ZapretError::FirewallError(format!("failed to write nft stdin: {}", e))
+            })?;
+        }
+
+        let output = child
             .wait_with_output()
             .await
             .map_err(|e| ZapretError::FirewallError(format!("nft failed: {}", e)))?;
@@ -138,11 +147,13 @@ table inet {table} {{
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(ZapretError::FirewallError(format!(
-                "nft failed: {}",
+                "nft failed (status={}): {}",
+                output.status.code().unwrap_or(-1),
                 stderr
             )));
         }
 
+        debug!("nftables script executed successfully");
         Ok(())
     }
 
@@ -179,5 +190,31 @@ table inet {table} {{
 
     fn iptables_available() -> bool {
         which::which("iptables").is_ok()
+    }
+}
+
+#[cfg(test)]
+mod firewall_tests {
+    use super::*;
+
+    fn test_config() -> ZapretConfig {
+        ZapretConfig::default_with_base(std::path::PathBuf::from("/tmp/test"))
+    }
+
+    #[test]
+    fn test_firewall_manager_new() {
+        let config = test_config();
+        let fw = FirewallManager::new(&config);
+        assert_eq!(fw.qnum, 200); // default value
+        assert_eq!(fw.table_name, "zapret2");
+    }
+
+    #[test]
+    fn test_is_active_without_nft() {
+        let config = test_config();
+        let fw = FirewallManager::new(&config);
+        // On systems without nftables, should return false
+        // This test documents expected behavior
+        let _ = fw.is_active();
     }
 }
