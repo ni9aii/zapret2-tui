@@ -46,7 +46,7 @@ pub struct App {
     pub current_tab: Tab,
     pub status: Status,
     pub logs: Vec<String>,
-    pub running: bool,
+    #[allow(dead_code)]
     controller: ZapretController,
 }
 
@@ -58,7 +58,6 @@ impl App {
             current_tab: Tab::Status,
             status: Status::default(),
             logs: Vec::new(),
-            running: true,
             controller,
         })
     }

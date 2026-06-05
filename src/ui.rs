@@ -1,14 +1,11 @@
 //! UI rendering for zapret2-tui
 
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     symbols,
-    text::{Line, Span, Text},
-    widgets::{
-        Block, Borders, Cell, Clear, Gauge, Paragraph, Row, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, Table, Tabs, Wrap,
-    },
+    text::{Line, Span},
+    widgets::{Block, Borders, Paragraph, Tabs, Wrap},
     Frame,
 };
 
@@ -77,8 +74,8 @@ fn draw_status_tab(f: &mut Frame, app: &App, area: Rect) {
 
     // Status block
     let status_text = format!(
-        "Daemon:     {}\n\
-         Firewall:   {}\n\
+        "Daemon:     {}\n\n\
+         Firewall:   {}\n\n\
          Profile:    {}\n\n\
          Press [s] to toggle, [r] to restart, [q] to quit",
         if app.status.daemon_running {
@@ -112,9 +109,9 @@ fn draw_status_tab(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(status_para, chunks[0]);
 
     // Info block
-    let info_text = "zapret2-tui v0.1.0\n\
-        Terminal UI for zapret2 DPI bypass\n\
-        \n\
+    let info_text = "zapret2-tui v0.1.0\n\n\
+        Terminal UI for zapret2 DPI bypass\n\n\
+        \n\n\
         https://github.com/ni9aii/zapret2-tui";
 
     let info_para = Paragraph::new(info_text)
@@ -125,7 +122,7 @@ fn draw_status_tab(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(info_para, chunks[1]);
 }
 
-fn draw_profiles_tab(f: &mut Frame, app: &App, area: Rect) {
+fn draw_profiles_tab(f: &mut Frame, _app: &App, area: Rect) {
     let text = "Profiles management\n\n\
         [↑/↓] Navigate  [Enter] Select  [a] Add  [d] Delete";
 
@@ -150,10 +147,11 @@ fn draw_logs_tab(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(para, area);
 }
 
-fn draw_settings_tab(f: &mut Frame, app: &App, area: Rect) {
+fn draw_settings_tab(f: &mut Frame, _app: &App, area: Rect) {
     let text = "Settings\n\n\
-        Config path: /opt/zapret2/config\n\
+        Config path: /opt/zapret2/config\n\n\
         zapret2 base: /opt/zapret2\n\n\
+        \n\n\
         [e] Edit config  [r] Reload";
 
     let para = Paragraph::new(text)

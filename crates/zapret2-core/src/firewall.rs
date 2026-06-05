@@ -121,6 +121,7 @@ table inet {table} {{
     }
 
     async fn run_nft(&self, script: &str) -> Result<()> {
+        let _ = script; // TODO: implement stdin input
         let output = Command::new("nft")
             .arg("-f")
             .arg("-")
