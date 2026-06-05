@@ -8,14 +8,11 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Alignment, Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
 };
 use std::io::{self, stdout};
-use tracing::{info, warn};
+use std::path::PathBuf;
+use tracing::info;
 
 mod app;
 mod ui;
@@ -30,8 +27,11 @@ async fn main() -> Result<()> {
     stdout().execute(EnterAlternateScreen)?;
     enable_raw_mode()?;
 
+    // Parse optional config path from args (can be extended with clap later)
+    let config_path = std::env::args().nth(1).map(PathBuf::from);
+    
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
-    let mut app = App::new();
+    let mut app = App::new(config_path)?;
 
     let result = run_app(&mut terminal, &mut app).await;
 
@@ -61,10 +61,14 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mu
                             break;
                         }
                         KeyCode::Char('s') | KeyCode::Char('S') => {
-                            app.toggle_status().await?;
+                            if let Err(e) = app.toggle_status().await {
+                                app.add_log(format!("toggle error: {}", e));
+                            }
                         }
                         KeyCode::Char('r') | KeyCode::Char('R') => {
-                            app.restart().await?;
+                            if let Err(e) = app.restart().await {
+                                app.add_log(format!("restart error: {}", e));
+                            }
                         }
                         KeyCode::Tab => app.next_tab(),
                         KeyCode::BackTab => app.prev_tab(),
@@ -75,7 +79,9 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mu
         }
 
         if last_tick.elapsed() >= tick_rate {
-            app.on_tick().await?;
+            if let Err(e) = app.on_tick().await {
+                app.add_log(format!("tick error: {}", e));
+            }
             last_tick = std::time::Instant::now();
         }
     }
