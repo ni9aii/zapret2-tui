@@ -59,9 +59,9 @@ impl DaemonManager {
         let mut cmd = Command::new(&self.bin_path);
         cmd.arg(format!("--qnum={}", self.qnum));
 
-        for arg in shell_words::split(&self.opts).map_err(|e| {
-            ZapretError::ConfigError(format!("failed to parse NFQWS2_OPT: {}", e))
-        })? {
+        for arg in shell_words::split(&self.opts)
+            .map_err(|e| ZapretError::ConfigError(format!("failed to parse NFQWS2_OPT: {}", e)))?
+        {
             cmd.arg(arg);
         }
 
@@ -71,9 +71,9 @@ impl DaemonManager {
 
         info!("starting nfqws2: {:?}", cmd);
 
-        let mut child = cmd.spawn().map_err(|e| {
-            ZapretError::ProcessError(format!("failed to spawn nfqws2: {}", e))
-        })?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| ZapretError::ProcessError(format!("failed to spawn nfqws2: {}", e)))?;
 
         // Spawn stdout/stderr log capture task
         if let Some(stdout) = child.stdout.take() {

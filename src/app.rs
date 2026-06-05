@@ -93,7 +93,7 @@ impl App {
                 }
             }
         }
-        
+
         // Update status after operation
         self.update_status();
         Ok(())

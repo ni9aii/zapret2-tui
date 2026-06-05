@@ -71,10 +71,7 @@ fn draw_content(f: &mut Frame, app: &App, area: Rect) {
 fn draw_status_tab(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(8),
-            Constraint::Min(0),
-        ])
+        .constraints([Constraint::Length(8), Constraint::Min(0)])
         .margin(1)
         .split(area);
 
@@ -94,10 +91,7 @@ fn draw_status_tab(f: &mut Frame, app: &App, area: Rect) {
         } else {
             "○ Inactive"
         },
-        app.status
-            .current_profile
-            .as_deref()
-            .unwrap_or("none"),
+        app.status.current_profile.as_deref().unwrap_or("none"),
     );
 
     let status_color = if app.status.daemon_running {
@@ -180,8 +174,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         app.current_tab.title()
     );
 
-    let footer = Paragraph::new(status)
-        .style(Style::default().fg(Color::DarkGray));
+    let footer = Paragraph::new(status).style(Style::default().fg(Color::DarkGray));
 
     f.render_widget(footer, area);
 }

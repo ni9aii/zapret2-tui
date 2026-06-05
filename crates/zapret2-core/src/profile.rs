@@ -24,10 +24,7 @@ impl Default for Profile {
             name: "default".to_string(),
             description: "Default YouTube + Discord bypass".to_string(),
             strategy: "youtube-discord".to_string(),
-            hostlists: vec![
-                "youtube.txt".to_string(),
-                "discord.txt".to_string(),
-            ],
+            hostlists: vec!["youtube.txt".to_string(), "discord.txt".to_string()],
             nfqws_opts: "--qnum=200".to_string(),
         }
     }
@@ -61,8 +58,9 @@ impl ProfileManager {
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) == Some("toml") {
                 let content = std::fs::read_to_string(&path)?;
-                let profile: Profile = toml::from_str(&content)
-                    .map_err(|e| crate::ZapretError::ConfigError(format!("invalid profile: {}", e)))?;
+                let profile: Profile = toml::from_str(&content).map_err(|e| {
+                    crate::ZapretError::ConfigError(format!("invalid profile: {}", e))
+                })?;
                 self.profiles.insert(profile.name.clone(), profile);
             }
         }

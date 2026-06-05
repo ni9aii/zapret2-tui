@@ -35,9 +35,7 @@ impl FirewallManager {
             crate::config::FirewallType::Nftables | crate::config::FirewallType::Auto => {
                 Self::check_nft_table_exists(&self.table_name)
             }
-            crate::config::FirewallType::Iptables => {
-                Self::check_iptables_chain_exists()
-            }
+            crate::config::FirewallType::Iptables => Self::check_iptables_chain_exists(),
         }
     }
 
