@@ -122,3 +122,19 @@ impl DaemonManager {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ZapretConfig;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_is_running_returns_false_when_no_pid_file() {
+        let config = ZapretConfig::default_with_base(PathBuf::from("/tmp/test"));
+        let manager = DaemonManager::new(&config);
+        // Clean up any leftover pid file
+        let _ = std::fs::remove_file("/tmp/nfqws2.pid");
+        assert!(!manager.is_running());
+    }
+}

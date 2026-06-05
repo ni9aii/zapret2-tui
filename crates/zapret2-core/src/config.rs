@@ -43,7 +43,7 @@ impl ZapretConfig {
         Self::parse(&content, path)
     }
 
-    fn default_with_base(config_path: PathBuf) -> Self {
+    pub(crate) fn default_with_base(config_path: PathBuf) -> Self {
         Self {
             zapret_base: PathBuf::from(crate::DEFAULT_ZAPRET_BASE),
             config_path,
