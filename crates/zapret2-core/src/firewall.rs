@@ -6,7 +6,7 @@
 use std::process::Stdio;
 
 use tokio::process::Command;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::{config::ZapretConfig, Result, ZapretError};
 
@@ -14,6 +14,7 @@ pub struct FirewallManager {
     fwtype: crate::config::FirewallType,
     qnum: u16,
     desync_mark: u32,
+    #[allow(dead_code)]
     desync_mark_postnat: u32,
     table_name: String,
 }

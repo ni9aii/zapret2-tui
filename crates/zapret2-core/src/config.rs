@@ -4,9 +4,9 @@
 //! The config is a series of shell variable assignments.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use crate::{Result, ZapretError, DEFAULT_CONFIG_PATH};
+use crate::{Result, DEFAULT_CONFIG_PATH};
 
 #[derive(Debug, Clone, Default)]
 pub struct ZapretConfig {

@@ -3,7 +3,7 @@
 //! Profiles define which Lua strategies and hostlists to use.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
