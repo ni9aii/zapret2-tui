@@ -132,15 +132,15 @@ impl DaemonManager {
                 use nix::sys::signal::kill;
                 use nix::sys::signal::Signal;
                 use nix::unistd::Pid;
-                
+
                 let pid = Pid::from_raw(child.id().unwrap_or(0) as i32);
                 let _ = kill(pid, Signal::SIGTERM);
-                
+
                 // Wait briefly for graceful shutdown
                 let wait_timeout = tokio::time::Duration::from_secs(3);
                 tokio::time::sleep(wait_timeout).await;
             }
-            
+
             // Force kill if still running
             match child.kill().await {
                 Ok(_) => {

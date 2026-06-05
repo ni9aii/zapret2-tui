@@ -1,7 +1,7 @@
 //! Application state management
 
-use zapret2_core::{Status, ZapretController};
 use std::collections::VecDeque;
+use zapret2_core::{Status, ZapretController};
 
 use anyhow::Result;
 use std::path::PathBuf;
