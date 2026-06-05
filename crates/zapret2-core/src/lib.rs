@@ -14,7 +14,7 @@
 //!
 //! # async fn example() -> anyhow::Result<()> {
 //! let mut controller = ZapretController::new(None)?;
-//! let status = controller.status();
+//! let status = controller.status().await;
 //! println!("Daemon running: {}", status.daemon_running);
 //!
 //! // Start zapret2 (requires root for nftables)
@@ -80,11 +80,11 @@ pub const DEFAULT_NFQWS2_BIN: &str = "/opt/zapret2/nfq2/nfqws2";
 /// let mut controller = ZapretController::new(Some(PathBuf::from("/opt/zapret2/config")))?;
 ///
 /// // Check status
-/// let status = controller.status();
+/// let status = controller.status().await;
 /// println!("Running: {:?}", status);
 ///
 /// // Start (requires root for nftables)
-/// controller.start().await?;
+/// // controller.start().await?;
 /// # Ok(())
 /// # }
 /// ```
