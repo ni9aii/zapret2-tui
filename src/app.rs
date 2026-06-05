@@ -1,6 +1,7 @@
 //! Application state management
 
 use zapret2_core::{Status, ZapretController};
+use std::collections::VecDeque;
 
 use anyhow::Result;
 use std::path::PathBuf;
@@ -45,7 +46,7 @@ impl Tab {
 pub struct App {
     pub current_tab: Tab,
     pub status: Status,
-    pub logs: Vec<String>,
+    pub logs: VecDeque<String>,
     #[allow(dead_code)]
     controller: ZapretController,
 }
@@ -57,7 +58,7 @@ impl App {
         Ok(Self {
             current_tab: Tab::Status,
             status: Status::default(),
-            logs: Vec::new(),
+            logs: VecDeque::new(),
             controller,
         })
     }
@@ -72,62 +73,56 @@ impl App {
 
     pub async fn toggle_status(&mut self) -> Result<()> {
         if self.status.daemon_running {
-            self.add_log("Stopping zapret2...".to_string());
+            self.add_log("Stopping zapret2...");
             match self.controller.stop().await {
                 Ok(_) => {
-                    self.add_log("zapret2 stopped".to_string());
+                    self.add_log("zapret2 stopped");
                 }
                 Err(e) => {
-                    self.add_log(format!("Stop failed: {}", e));
+                    self.add_log(&format!("Stop failed: {e}"));
                 }
             }
         } else {
-            self.add_log("Starting zapret2...".to_string());
+            self.add_log("Starting zapret2...");
             match self.controller.start().await {
                 Ok(_) => {
-                    self.add_log("zapret2 started".to_string());
+                    self.add_log("zapret2 started");
                 }
                 Err(e) => {
-                    self.add_log(format!("Start failed: {}", e));
+                    self.add_log(&format!("Start failed: {e}"));
                 }
             }
         }
 
         // Update status after operation
-        self.update_status();
+        self.update_status().await;
         Ok(())
     }
 
     pub async fn restart(&mut self) -> Result<()> {
-        self.add_log("Restarting zapret2...".to_string());
+        self.add_log("Restarting zapret2...");
         match self.controller.restart().await {
             Ok(_) => {
-                self.add_log("zapret2 restarted".to_string());
+                self.add_log("zapret2 restarted");
             }
             Err(e) => {
-                self.add_log(format!("Restart failed: {}", e));
+                self.add_log(&format!("Restart failed: {e}"));
             }
         }
-        self.update_status();
+        self.update_status().await;
         Ok(())
     }
 
-    pub async fn on_tick(&mut self) -> Result<()> {
-        // Pull latest status from controller
-        self.update_status();
-        Ok(())
+    pub async fn update_status(&mut self) {
+        self.status = self.controller.status().await;
     }
 
-    fn update_status(&mut self) {
-        self.status = self.controller.status();
-    }
-
-    pub fn add_log(&mut self, msg: String) {
+    pub fn add_log(&mut self, msg: &str) {
         let timestamp = chrono::Local::now().format("%H:%M:%S");
-        self.logs.push(format!("[{}] {}", timestamp, msg));
+        self.logs.push_back(format!("[{}] {}", timestamp, msg));
         // Keep last 1000 lines
-        if self.logs.len() > 1000 {
-            self.logs.remove(0);
+        while self.logs.len() > 1000 {
+            self.logs.pop_front();
         }
     }
 }

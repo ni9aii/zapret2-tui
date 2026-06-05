@@ -52,6 +52,7 @@ ctrlc = "3"
 ratatui = "0.29"
 crossterm = "0.28"
 chrono = "0.4"
+nix = "0.31"
 zapret2-core = { path = "crates/zapret2-core" }
 
 [profile.release]

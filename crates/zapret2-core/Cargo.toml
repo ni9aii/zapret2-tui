@@ -17,6 +17,7 @@ toml.workspace = true
 which = "8.0.2"
 shell-words = "1.1.1"
 libc = "0.2.186"
+nix = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

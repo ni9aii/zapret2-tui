@@ -111,10 +111,10 @@ impl ZapretController {
     }
 
     /// Returns current status of daemon and firewall.
-    pub fn status(&self) -> Status {
+    pub async fn status(&self) -> Status {
         Status {
             daemon_running: self.daemon.is_running(),
-            firewall_active: self.firewall.is_active(),
+            firewall_active: self.firewall.is_active().await,
             current_profile: self.config.current_profile.clone(),
         }
     }

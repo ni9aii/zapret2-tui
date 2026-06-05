@@ -73,12 +73,12 @@ async fn run_app(
                         }
                         KeyCode::Char('s') | KeyCode::Char('S') => {
                             if let Err(e) = app.toggle_status().await {
-                                app.add_log(format!("toggle error: {}", e));
+                                app.add_log(&format!("toggle error: {e}"));
                             }
                         }
                         KeyCode::Char('r') | KeyCode::Char('R') => {
                             if let Err(e) = app.restart().await {
-                                app.add_log(format!("restart error: {}", e));
+                                app.add_log(&format!("restart error: {e}"));
                             }
                         }
                         KeyCode::Tab => app.next_tab(),
@@ -90,9 +90,7 @@ async fn run_app(
         }
 
         if last_tick.elapsed() >= tick_rate {
-            if let Err(e) = app.on_tick().await {
-                app.add_log(format!("tick error: {}", e));
-            }
+            app.update_status().await;
             last_tick = std::time::Instant::now();
         }
     }

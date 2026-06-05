@@ -137,7 +137,7 @@ fn draw_logs_tab(f: &mut Frame, app: &App, area: Rect) {
     let logs_text = if app.logs.is_empty() {
         "No logs yet. Start the daemon to see output.".to_string()
     } else {
-        app.logs.join("\n")
+        app.logs.iter().cloned().collect::<Vec<_>>().join("\\n")
     };
 
     let para = Paragraph::new(logs_text)

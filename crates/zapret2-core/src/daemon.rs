@@ -44,7 +44,16 @@ impl DaemonManager {
                     if result == 0 {
                         return true;
                     }
-                    // kill returned -1 with errno (ESRCH=no such process, etc.)
+                    // kill returned -1 with errno - check for ESRCH (no such process)
+                    // errno=3 (ESRCH) means process doesn't exist, which is OK
+                    // Other errors (EACCES, etc.) should not be ignored
+                    let errno = unsafe { *libc::__errno_location() };
+                    // ESRCH = 3 (no such process) - process not running is expected
+                    // Any other error while kill returned -1 should be logged
+                    #[cfg(debug_assertions)]
+                    if errno != 3 {
+                        warn!("is_running: unexpected errno from kill: {}", errno);
+                    }
                 }
             }
             false
@@ -117,16 +126,32 @@ impl DaemonManager {
     pub async fn stop(&mut self) -> Result<()> {
         if let Some(mut child) = self.child.take() {
             info!("stopping nfqws2");
+            // Try graceful shutdown first with SIGTERM
+            #[cfg(unix)]
+            {
+                use nix::sys::signal::kill;
+                use nix::sys::signal::Signal;
+                use nix::unistd::Pid;
+                
+                let pid = Pid::from_raw(child.id().unwrap_or(0) as i32);
+                let _ = kill(pid, Signal::SIGTERM);
+                
+                // Wait briefly for graceful shutdown
+                let wait_timeout = tokio::time::Duration::from_secs(3);
+                tokio::time::sleep(wait_timeout).await;
+            }
+            
+            // Force kill if still running
             match child.kill().await {
                 Ok(_) => {
                     let _ = child.wait().await;
                     info!("nfqws2 stopped");
-                    let _ = std::fs::remove_file("/tmp/nfqws2.pid");
                 }
                 Err(e) => {
-                    warn!("failed to kill nfqws2: {}", e);
+                    warn!("failed to stop nfqws2: {e}");
                 }
             }
+            let _ = std::fs::remove_file("/tmp/nfqws2.pid");
         }
         Ok(())
     }

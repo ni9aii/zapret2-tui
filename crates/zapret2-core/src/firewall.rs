@@ -30,11 +30,11 @@ impl FirewallManager {
         }
     }
 
-    pub fn is_active(&self) -> bool {
+    pub async fn is_active(&self) -> bool {
         // Check if our table/chain exists
         match self.fwtype {
             crate::config::FirewallType::Nftables | crate::config::FirewallType::Auto => {
-                Self::check_nft_table_exists(&self.table_name)
+                Self::check_nft_table_exists(&self.table_name).await
             }
             crate::config::FirewallType::Iptables => Self::check_iptables_chain_exists(),
         }
@@ -157,10 +157,11 @@ table inet {table} {{
         Ok(())
     }
 
-    fn check_nft_table_exists(table: &str) -> bool {
-        std::process::Command::new("nft")
+    async fn check_nft_table_exists(table: &str) -> bool {
+        Command::new("nft")
             .args(["list", "table", "inet", table])
             .output()
+            .await
             .map(|o| o.status.success())
             .unwrap_or(false)
     }
