@@ -194,7 +194,7 @@ impl DaemonManager {
                     warn!("failed to stop nfqws2: {e}");
                 }
             }
-            let _ = std::fs::remove_file("/tmp/nfqws2.pid");
+            let _ = std::fs::remove_file(NFQWS2_PID_FILE);
         }
         Ok(())
     }
