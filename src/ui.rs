@@ -1,7 +1,7 @@
 //! UI rendering for zapret2-tui
 
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, HorizontalAlignment, Layout, Rect},
     style::{Color, Modifier, Style},
     symbols,
     text::{Line, Span},
@@ -42,7 +42,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         .block(
             Block::default()
                 .title(" zapret2-tui ")
-                .title_alignment(Alignment::Center)
+                .title_alignment(HorizontalAlignment::Center)
                 .borders(Borders::ALL),
         )
         .select(app.current_tab as usize)
@@ -116,7 +116,6 @@ fn draw_status_tab(f: &mut Frame, app: &App, area: Rect) {
 
     let info_para = Paragraph::new(info_text)
         .block(Block::default().title(" Info ").borders(Borders::ALL))
-        .alignment(Alignment::Center)
         .wrap(Wrap { trim: true });
 
     f.render_widget(info_para, chunks[1]);
