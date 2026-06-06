@@ -19,8 +19,6 @@ jobs:
         run: cargo fmt -- --check
       - name: Clippy
         run: cargo clippy --all-targets --workspace -- -D warnings
-      - name: Audit dependencies
-        run: cargo install cargo-audit && cargo audit || true  # Warnings don't fail CI
 
       - name: Test
         run: cargo test --workspace
