@@ -10,6 +10,8 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io::{self, stdout};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tracing::info;
 
 mod app;
@@ -32,6 +34,14 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
+    // Setup Ctrl+C handler for graceful shutdown
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    })
+    .map_err(|e| anyhow::anyhow!("Failed to set Ctrl+C handler: {}", e))?;
+
     tracing_subscriber::fmt::init();
     info!("starting zapret2-tui");
 
@@ -41,7 +51,7 @@ async fn main() -> Result<()> {
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     let mut app = App::new(args.config)?;
 
-    let result = run_app(&mut terminal, &mut app).await;
+    let result = run_app(&mut terminal, &mut app, running).await;
 
     disable_raw_mode()?;
     stdout().execute(LeaveAlternateScreen)?;
@@ -52,11 +62,12 @@ async fn main() -> Result<()> {
 async fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
+    running: Arc<AtomicBool>,
 ) -> Result<()> {
     let mut last_tick = std::time::Instant::now();
     let tick_rate = std::time::Duration::from_millis(250);
 
-    loop {
+    while running.load(Ordering::SeqCst) {
         terminal.draw(|f| ui::draw(f, app))?;
 
         let timeout = tick_rate
