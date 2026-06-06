@@ -9,6 +9,13 @@ use tracing::{info, warn};
 
 use crate::{config::ZapretConfig, Result, ZapretError};
 
+/// Whitelist of allowed nfqws2 arguments for security hardening
+const ALLOWED_NFQWS_OPTS: &[&str] = &[
+    "--qnum", "--desync", "--hostlist", "--split", "--wss", "--dpi-desync",
+    "--dpi-desync-fw-external", "--dpi-desync-ttl", "--encrypt", "--md5",
+    "--server", "--port", "--proxy", "--proxy-host", "--proxy-port",
+];
+
 pub struct DaemonManager {
     bin_path: PathBuf,
     opts: String,
@@ -64,6 +71,18 @@ impl DaemonManager {
         }
     }
 
+    /// Validates that an argument is in the whitelist (prevents command injection)
+    fn validate_arg(arg: &str) -> bool {
+        if arg.starts_with('-') {
+            // It's a flag - check if it matches whitelist
+            let flag = arg.split('=').next().unwrap_or(arg);
+            ALLOWED_NFQWS_OPTS.contains(&flag)
+        } else {
+            // Non-flag arguments (values) are allowed
+            true
+        }
+    }
+
     pub async fn start(&mut self) -> Result<()> {
         if self.is_running() {
             warn!("nfqws2 is already running");
@@ -80,6 +99,12 @@ impl DaemonManager {
         for arg in shell_words::split(&self.opts)
             .map_err(|e| ZapretError::ConfigError(format!("failed to parse NFQWS2_OPT: {}", e)))?
         {
+            if !Self::validate_arg(&arg) {
+                return Err(ZapretError::ConfigError(format!(
+                    "forbidden argument in NFQWS2_OPT: {}",
+                    arg
+                )));
+            }
             cmd.arg(arg);
         }
 

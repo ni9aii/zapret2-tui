@@ -43,6 +43,16 @@ impl ProfileManager {
         }
     }
 
+    /// Validates profile name to prevent path traversal attacks.
+    fn validate_profile_name(name: &str) -> bool {
+        // Disallow path separators and parent directory references
+        !name.is_empty() 
+            && !name.contains('/') 
+            && !name.contains('\\') 
+            && !name.contains("..")
+            && name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
+    }
+
     pub fn load(&mut self) -> Result<()> {
         if !self.profiles_dir.exists() {
             std::fs::create_dir_all(&self.profiles_dir)?;
@@ -69,6 +79,11 @@ impl ProfileManager {
     }
 
     pub fn save_profile(&self, profile: &Profile) -> Result<()> {
+        if !Self::validate_profile_name(&profile.name) {
+            return Err(crate::ZapretError::ConfigError(
+                "invalid profile name: path traversal not allowed".to_string(),
+            ));
+        }
         let path = self.profiles_dir.join(format!("{}.toml", profile.name));
         let content = toml::to_string_pretty(profile)
             .map_err(|e| crate::ZapretError::ConfigError(format!("serialize error: {}", e)))?;
@@ -85,6 +100,11 @@ impl ProfileManager {
     }
 
     pub fn remove(&mut self, name: &str) -> Result<()> {
+        if !Self::validate_profile_name(name) {
+            return Err(crate::ZapretError::ConfigError(
+                "invalid profile name: path traversal not allowed".to_string(),
+            ));
+        }
         self.profiles.remove(name);
         let path = self.profiles_dir.join(format!("{}.toml", name));
         if path.exists() {

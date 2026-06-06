@@ -30,8 +30,8 @@ impl FirewallManager {
         }
     }
 
+    /// Check if firewall rules are currently applied.
     pub async fn is_active(&self) -> bool {
-        // Check if our table/chain exists
         match self.fwtype {
             crate::config::FirewallType::Nftables | crate::config::FirewallType::Auto => {
                 Self::check_nft_table_exists(&self.table_name).await
@@ -40,12 +40,12 @@ impl FirewallManager {
         }
     }
 
+    /// Apply firewall redirection rules.
     pub async fn apply(&self) -> Result<()> {
         match self.fwtype {
             crate::config::FirewallType::Nftables => self.apply_nftables().await,
             crate::config::FirewallType::Iptables => self.apply_iptables().await,
             crate::config::FirewallType::Auto => {
-                // Try nftables first, fall back to iptables
                 if Self::nftables_available() {
                     self.apply_nftables().await
                 } else if Self::iptables_available() {
@@ -59,12 +59,12 @@ impl FirewallManager {
         }
     }
 
+    /// Remove applied firewall rules.
     pub async fn remove(&self) -> Result<()> {
         match self.fwtype {
             crate::config::FirewallType::Nftables => self.remove_nftables().await,
             crate::config::FirewallType::Iptables => self.remove_iptables().await,
             crate::config::FirewallType::Auto => {
-                // Try both to be safe
                 let _ = self.remove_nftables().await;
                 let _ = self.remove_iptables().await;
                 Ok(())
@@ -77,7 +77,6 @@ impl FirewallManager {
     async fn apply_nftables(&self) -> Result<()> {
         info!("applying nftables rules");
 
-        // Remove existing rules first to avoid duplicates
         let _ = self.remove_nftables().await;
 
         let script = format!(
@@ -131,7 +130,6 @@ table inet {table} {{
             .spawn()
             .map_err(|e| ZapretError::FirewallError(format!("failed to spawn nft: {}", e)))?;
 
-        // Write script to stdin
         if let Some(mut stdin) = child.stdin.take() {
             use tokio::io::AsyncWriteExt;
             stdin.write_all(script.as_bytes()).await.map_err(|e| {
@@ -174,18 +172,15 @@ table inet {table} {{
 
     async fn apply_iptables(&self) -> Result<()> {
         info!("applying iptables rules");
-        // TODO: implement iptables rules
         warn!("iptables support not yet implemented");
         Ok(())
     }
 
     async fn remove_iptables(&self) -> Result<()> {
-        // TODO: implement iptables removal
         Ok(())
     }
 
     fn check_iptables_chain_exists() -> bool {
-        // TODO
         false
     }
 
@@ -206,16 +201,7 @@ mod firewall_tests {
     fn test_firewall_manager_new() {
         let config = test_config();
         let fw = FirewallManager::new(&config);
-        assert_eq!(fw.qnum, 200); // default value
+        assert_eq!(fw.qnum, 200);
         assert_eq!(fw.table_name, "zapret2");
-    }
-
-    #[test]
-    fn test_is_active_without_nft() {
-        let config = test_config();
-        // On systems without nftables, should return false
-        // This test documents expected behavior
-        // Note: is_active is now async, use .await in async context
-        let _fw = FirewallManager::new(&config);
     }
 }
