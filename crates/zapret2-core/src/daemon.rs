@@ -1,4 +1,6 @@
 //! nfqws2 daemon process management
+//!
+//! Manages NFQUEUE redirection rules for nfqws2.
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -8,6 +10,10 @@ use tokio::process::{Child, Command};
 use tracing::{info, warn};
 
 use crate::{config::ZapretConfig, Result, ZapretError};
+
+/// Path to PID file for tracking nfqws2 process.
+/// Uses /var/run for proper permissions on Linux systems.
+pub const NFQWS2_PID_FILE: &str = "/var/run/nfqws2.pid";
 
 /// Whitelist of allowed nfqws2 arguments for security hardening
 const ALLOWED_NFQWS_OPTS: &[&str] = &[
@@ -51,8 +57,7 @@ impl DaemonManager {
         #[cfg(unix)]
         {
             use std::fs;
-            // Note: PID file path should be configurable in future
-            if let Ok(pid_str) = fs::read_to_string("/tmp/nfqws2.pid") {
+            if let Ok(pid_str) = fs::read_to_string(NFQWS2_PID_FILE) {
                 if let Ok(pid) = pid_str.trim().parse::<i32>() {
                     // Validate PID is reasonable (must be positive)
                     if pid <= 0 {
@@ -152,7 +157,7 @@ impl DaemonManager {
 
         // Write pid file for later tracking
         if let Some(pid) = child.id() {
-            let _ = std::fs::write("/tmp/nfqws2.pid", pid.to_string());
+            let _ = std::fs::write(NFQWS2_PID_FILE, pid.to_string());
         }
 
         self.child = Some(child);
@@ -206,7 +211,7 @@ mod tests {
         let config = ZapretConfig::default_with_base(PathBuf::from("/tmp/test"));
         let manager = DaemonManager::new(&config);
         // Clean up any leftover pid file
-        let _ = std::fs::remove_file("/tmp/nfqws2.pid");
+        let _ = std::fs::remove_file(NFQWS2_PID_FILE);
         assert!(!manager.is_running());
     }
 }
