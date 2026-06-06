@@ -11,9 +11,21 @@ use crate::{config::ZapretConfig, Result, ZapretError};
 
 /// Whitelist of allowed nfqws2 arguments for security hardening
 const ALLOWED_NFQWS_OPTS: &[&str] = &[
-    "--qnum", "--desync", "--hostlist", "--split", "--wss", "--dpi-desync",
-    "--dpi-desync-fw-external", "--dpi-desync-ttl", "--encrypt", "--md5",
-    "--server", "--port", "--proxy", "--proxy-host", "--proxy-port",
+    "--qnum",
+    "--desync",
+    "--hostlist",
+    "--split",
+    "--wss",
+    "--dpi-desync",
+    "--dpi-desync-fw-external",
+    "--dpi-desync-ttl",
+    "--encrypt",
+    "--md5",
+    "--server",
+    "--port",
+    "--proxy",
+    "--proxy-host",
+    "--proxy-port",
 ];
 
 pub struct DaemonManager {
@@ -54,6 +66,7 @@ impl DaemonManager {
                     // kill returned -1 with errno - check for ESRCH (no such process)
                     // errno=3 (ESRCH) means process doesn't exist, which is OK
                     // Other errors (EACCES, etc.) should not be ignored
+                    #[cfg(debug_assertions)]
                     let errno = unsafe { *libc::__errno_location() };
                     // ESRCH = 3 (no such process) - process not running is expected
                     // Any other error while kill returned -1 should be logged

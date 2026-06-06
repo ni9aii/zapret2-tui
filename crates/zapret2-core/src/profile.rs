@@ -46,11 +46,13 @@ impl ProfileManager {
     /// Validates profile name to prevent path traversal attacks.
     fn validate_profile_name(name: &str) -> bool {
         // Disallow path separators and parent directory references
-        !name.is_empty() 
-            && !name.contains('/') 
-            && !name.contains('\\') 
+        !name.is_empty()
+            && !name.contains('/')
+            && !name.contains('\\')
             && !name.contains("..")
-            && name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
+            && name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
     }
 
     pub fn load(&mut self) -> Result<()> {
