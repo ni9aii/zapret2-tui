@@ -21,6 +21,8 @@ jobs:
         run: cargo clippy --all-targets --workspace -- -D warnings
       - name: Audit dependencies
         uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Test
         run: cargo test --workspace
