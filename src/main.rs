@@ -3,7 +3,7 @@
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{self, Event, KeyEventKind},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
@@ -76,32 +76,15 @@ async fn run_app(
 
         if crossterm::event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Char('Q') => {
-                            info!("quit requested");
-                            break;
-                        }
-                        KeyCode::Char('s') | KeyCode::Char('S') => {
-                            if let Err(e) = app.toggle_status().await {
-                                app.add_log(&format!("toggle error: {e}"));
-                            }
-                        }
-                        KeyCode::Char('r') | KeyCode::Char('R') => {
-                            if let Err(e) = app.restart().await {
-                                app.add_log(&format!("restart error: {e}"));
-                            }
-                        }
-                        KeyCode::Tab => app.next_tab(),
-                        KeyCode::BackTab => app.prev_tab(),
-                        _ => {}
-                    }
+                if key.kind == KeyEventKind::Press && app.handle_key(key.code).await? {
+                    info!("quit requested");
+                    break;
                 }
             }
         }
 
         if last_tick.elapsed() >= tick_rate {
-            app.update_status().await;
+            app.on_tick().await;
             last_tick = std::time::Instant::now();
         }
     }
