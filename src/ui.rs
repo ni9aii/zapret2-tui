@@ -1,57 +1,53 @@
 //! UI rendering for zapret2-tui
 
 use ratatui::{
-    layout::{Constraint, Direction, HorizontalAlignment, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    symbols,
-    text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Tabs, Wrap},
+    text::{Line, Span, Text},
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState, Tabs, Wrap},
     Frame,
 };
 
 use crate::app::{App, Tab};
 
 pub fn draw(f: &mut Frame, app: &App) {
+    let area = f.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
             Constraint::Min(0),
-            Constraint::Length(1),
+            Constraint::Length(2),
         ])
-        .split(f.area());
+        .split(area);
 
     draw_header(f, app, chunks[0]);
     draw_content(f, app, chunks[1]);
     draw_footer(f, app, chunks[2]);
+
+    if app.show_help {
+        draw_help(f, area);
+    }
 }
 
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let titles: Vec<Line> = [Tab::Status, Tab::Profiles, Tab::Logs, Tab::Settings]
         .iter()
-        .map(|t| {
-            let title = t.title();
-            Line::from(vec![Span::styled(
-                format!("  {}  ", title),
-                Style::default(),
-            )])
-        })
+        .map(|t| Line::from(vec![Span::raw(format!("  {}  ", t.title()))]))
         .collect();
 
     let tabs = Tabs::new(titles)
         .block(
             Block::default()
                 .title(" zapret2-tui ")
-                .title_alignment(HorizontalAlignment::Center)
                 .borders(Borders::ALL),
         )
-        .select(app.current_tab as usize)
+        .select(app.current_tab.index())
         .highlight_style(
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
-        )
-        .divider(symbols::line::VERTICAL);
+        );
 
     f.render_widget(tabs, area);
 }
@@ -68,110 +64,259 @@ fn draw_content(f: &mut Frame, app: &App, area: Rect) {
 fn draw_status_tab(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(8), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(8),
+            Constraint::Length(6),
+            Constraint::Min(0),
+        ])
         .margin(1)
         .split(area);
 
-    // Status block
-    let status_text = format!(
-        "Daemon:     {}\n\n\
-         Firewall:   {}\n\n\
-         Profile:    {}\n\n\
-         Press [s] to toggle, [r] to restart, [q] to quit",
-        if app.status.daemon_running {
-            "● Running"
-        } else {
-            "○ Stopped"
-        },
-        if app.status.firewall_active {
-            "● Active"
-        } else {
-            "○ Inactive"
-        },
-        app.status.current_profile.as_deref().unwrap_or("none"),
-    );
-
-    let status_color = if app.status.daemon_running {
+    let daemon_color = if app.status.daemon_running {
         Color::Green
     } else {
         Color::Red
     };
+    let daemon_text = if app.status.daemon_running {
+        "RUNNING"
+    } else {
+        "STOPPED"
+    };
+    let daemon_status = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("Daemon: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                daemon_text,
+                Style::default()
+                    .fg(daemon_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("PID: ", Style::default().fg(Color::Gray)),
+            Span::raw(
+                app.daemon_pid()
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Binary: ", Style::default().fg(Color::Gray)),
+            Span::raw(app.binary_path()),
+        ]),
+    ])
+    .block(Block::default().title(" Daemon ").borders(Borders::ALL));
+    f.render_widget(daemon_status, chunks[0]);
 
-    let status_para = Paragraph::new(status_text)
-        .block(
-            Block::default()
-                .title(" Status ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(status_color)),
-        )
-        .style(Style::default().fg(Color::White));
+    let fw_color = if app.status.firewall_active {
+        Color::Green
+    } else {
+        Color::Red
+    };
+    let fw_text = if app.status.firewall_active {
+        "ACTIVE"
+    } else {
+        "INACTIVE"
+    };
+    let firewall_status = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("Firewall: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                fw_text,
+                Style::default().fg(fw_color).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Queue: ", Style::default().fg(Color::Gray)),
+            Span::raw(app.queue_number().to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("Desync mark: ", Style::default().fg(Color::Gray)),
+            Span::raw(format!("{:#x}", app.desync_mark())),
+        ]),
+    ])
+    .block(Block::default().title(" Firewall ").borders(Borders::ALL));
+    f.render_widget(firewall_status, chunks[1]);
 
-    f.render_widget(status_para, chunks[0]);
-
-    // Info block
-    let info_text = "zapret2-tui v0.1.0\n\n\
-        Terminal UI for zapret2 DPI bypass\n\n\
-        \n\n\
-        https://github.com/ni9aii/zapret2-tui";
-
-    let info_para = Paragraph::new(info_text)
-        .block(Block::default().title(" Info ").borders(Borders::ALL))
+    let msg = Paragraph::new(app.status_message.as_str())
+        .block(Block::default().title(" Status ").borders(Borders::ALL))
         .wrap(Wrap { trim: true });
-
-    f.render_widget(info_para, chunks[1]);
+    f.render_widget(msg, chunks[2]);
 }
 
-fn draw_profiles_tab(f: &mut Frame, _app: &App, area: Rect) {
-    let text = "Profiles management\n\n\
-        [↑/↓] Navigate  [Enter] Select  [a] Add  [d] Delete";
+fn draw_profiles_tab(f: &mut Frame, app: &App, area: Rect) {
+    if app.profiles.is_empty() {
+        let empty =
+            Paragraph::new("No profiles found. Profiles are loaded from /opt/zapret2/profiles.")
+                .block(Block::default().title(" Profiles ").borders(Borders::ALL))
+                .alignment(Alignment::Center);
+        f.render_widget(empty, area);
+        return;
+    }
 
-    let para = Paragraph::new(text)
-        .block(Block::default().title(" Profiles ").borders(Borders::ALL))
-        .wrap(Wrap { trim: true });
+    let rows: Vec<Row> = app
+        .profiles
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let mut style = Style::default();
+            if app.active_profile.as_deref() == Some(p.name.as_str()) {
+                style = style.fg(Color::Green);
+            }
+            if i == app.profile_list_selected {
+                style = style.bg(Color::Cyan).fg(Color::Black);
+            }
+            Row::new(vec![
+                Cell::from(p.name.clone()).style(style),
+                Cell::from(p.description.clone()).style(style),
+                Cell::from(p.strategy.clone()).style(style),
+                Cell::from(p.hostlists.join(", ")).style(style),
+            ])
+        })
+        .collect();
 
-    f.render_widget(para, area);
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(16),
+            Constraint::Length(32),
+            Constraint::Length(22),
+            Constraint::Min(20),
+        ],
+    )
+    .header(
+        Row::new(vec!["Name", "Description", "Strategy", "Hostlists"])
+            .style(Style::default().add_modifier(Modifier::BOLD)),
+    )
+    .block(
+        Block::default()
+            .title(" Profiles (↑/↓, Enter select) ")
+            .borders(Borders::ALL),
+    );
+
+    let mut state = TableState::default().with_selected(Some(app.profile_list_selected));
+    f.render_stateful_widget(table, area, &mut state);
 }
 
 fn draw_logs_tab(f: &mut Frame, app: &App, area: Rect) {
-    let logs_text = if app.logs.is_empty() {
-        "No logs yet. Start the daemon to see output.".to_string()
+    let log_text: Vec<Line> = if app.logs.is_empty() {
+        vec![Line::from(
+            "No logs yet. Start the daemon to see nfqws2 output.",
+        )]
     } else {
-        app.logs.iter().cloned().collect::<Vec<_>>().join("\\n")
+        app.logs
+            .iter()
+            .map(|line| Line::from(line.as_str()))
+            .collect()
     };
 
-    let para = Paragraph::new(logs_text)
+    let logs = Paragraph::new(Text::from(log_text))
         .block(Block::default().title(" Logs ").borders(Borders::ALL))
-        .wrap(Wrap { trim: true });
-
-    f.render_widget(para, area);
+        .scroll((
+            app.logs.len().saturating_sub(area.height as usize) as u16,
+            0,
+        ))
+        .wrap(Wrap { trim: false });
+    f.render_widget(logs, area);
 }
 
-fn draw_settings_tab(f: &mut Frame, _app: &App, area: Rect) {
-    let text = "Settings\n\n\
-        Config path: /opt/zapret2/config\n\n\
-        zapret2 base: /opt/zapret2\n\n\
-        \n\n\
-        [e] Edit config  [r] Reload";
-
-    let para = Paragraph::new(text)
-        .block(Block::default().title(" Settings ").borders(Borders::ALL))
-        .wrap(Wrap { trim: true });
-
-    f.render_widget(para, area);
+fn draw_settings_tab(f: &mut Frame, app: &App, area: Rect) {
+    let settings = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("Config path: ", Style::default().fg(Color::Gray)),
+            Span::raw(app.config_path()),
+        ]),
+        Line::from(vec![
+            Span::styled("Binary: ", Style::default().fg(Color::Gray)),
+            Span::raw(app.binary_path()),
+        ]),
+        Line::from(vec![
+            Span::styled("Queue number: ", Style::default().fg(Color::Gray)),
+            Span::raw(app.queue_number().to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("Desync mark: ", Style::default().fg(Color::Gray)),
+            Span::raw(format!("{:#x}", app.desync_mark())),
+        ]),
+        Line::from(vec![
+            Span::styled("Postnat mark: ", Style::default().fg(Color::Gray)),
+            Span::raw(format!("{:#x}", app.postnat_mark())),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Active profile: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                app.active_profile.as_deref().unwrap_or("none"),
+                Style::default().fg(Color::Cyan),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Profiles loaded: ", Style::default().fg(Color::Gray)),
+            Span::raw(app.profiles.len().to_string()),
+        ]),
+    ])
+    .block(Block::default().title(" Settings ").borders(Borders::ALL));
+    f.render_widget(settings, area);
 }
 
-fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
-    let status = format!(
-        " {} | {}",
-        if app.status.daemon_running {
-            "running"
-        } else {
-            "stopped"
-        },
-        app.current_tab.title()
-    );
-
-    let footer = Paragraph::new(status).style(Style::default().fg(Color::DarkGray));
-
+fn draw_footer(f: &mut Frame, _app: &App, area: Rect) {
+    let footer = Paragraph::new(Line::from(vec![
+        Span::styled("Tab", Style::default().fg(Color::Cyan)),
+        Span::raw(" next | "),
+        Span::styled("s", Style::default().fg(Color::Cyan)),
+        Span::raw(" start/stop | "),
+        Span::styled("r", Style::default().fg(Color::Cyan)),
+        Span::raw(" restart | "),
+        Span::styled("h", Style::default().fg(Color::Cyan)),
+        Span::raw(" help | "),
+        Span::styled("q", Style::default().fg(Color::Cyan)),
+        Span::raw(" quit"),
+    ]))
+    .block(Block::default().borders(Borders::TOP));
     f.render_widget(footer, area);
+}
+
+fn draw_help(f: &mut Frame, area: Rect) {
+    let help_text = vec![
+        Line::from(Span::styled(
+            "Keyboard Shortcuts",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from("Tab / Shift+Tab  Switch tabs"),
+        Line::from("s                Start/Stop daemon"),
+        Line::from("r                Restart daemon"),
+        Line::from("↑/↓              Navigate profiles"),
+        Line::from("Enter            Select highlighted profile"),
+        Line::from("h / ?            This help"),
+        Line::from("q / Esc          Quit"),
+        Line::from(""),
+        Line::from("Press any key to close"),
+    ];
+
+    let popup_area = centered_rect(54, 44, area);
+    let help = Paragraph::new(Text::from(help_text))
+        .block(Block::default().title(" Help ").borders(Borders::ALL));
+    f.render_widget(Clear, popup_area);
+    f.render_widget(help, popup_area);
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(area);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(vertical[1])[1]
 }
