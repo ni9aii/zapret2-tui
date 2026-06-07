@@ -6,7 +6,7 @@
 use std::process::Stdio;
 
 use tokio::process::Command;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::{config::ZapretConfig, Result, ZapretError};
 
@@ -14,8 +14,6 @@ pub struct FirewallManager {
     fwtype: crate::config::FirewallType,
     qnum: u16,
     desync_mark: u32,
-    #[allow(dead_code)]
-    desync_mark_postnat: u32,
     table_name: String,
 }
 
@@ -25,7 +23,6 @@ impl FirewallManager {
             fwtype: config.fwtype,
             qnum: config.qnum,
             desync_mark: config.desync_mark,
-            desync_mark_postnat: config.desync_mark_postnat,
             table_name: "zapret2".to_string(),
         }
     }
@@ -171,13 +168,18 @@ table inet {table} {{
     // --- iptables implementation ---
 
     async fn apply_iptables(&self) -> Result<()> {
-        info!("applying iptables rules");
-        warn!("iptables support not yet implemented");
-        Ok(())
+        Err(Self::iptables_unsupported_error())
     }
 
     async fn remove_iptables(&self) -> Result<()> {
-        Ok(())
+        Err(Self::iptables_unsupported_error())
+    }
+
+    fn iptables_unsupported_error() -> ZapretError {
+        ZapretError::FirewallError(
+            "iptables backend is not implemented yet; set FWTYPE=nftables or FWTYPE=auto with nft available"
+                .to_string(),
+        )
     }
 
     fn check_iptables_chain_exists() -> bool {
@@ -203,5 +205,39 @@ mod firewall_tests {
         let fw = FirewallManager::new(&config);
         assert_eq!(fw.qnum, 200);
         assert_eq!(fw.table_name, "zapret2");
+    }
+
+    #[tokio::test]
+    async fn explicit_iptables_apply_returns_unsupported_error() {
+        let mut config = test_config();
+        config.fwtype = crate::config::FirewallType::Iptables;
+        let fw = FirewallManager::new(&config);
+
+        let err = fw
+            .apply()
+            .await
+            .expect_err("iptables backend must not report success");
+
+        assert!(
+            matches!(err, ZapretError::FirewallError(ref message) if message.contains("iptables backend is not implemented")),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_iptables_remove_returns_unsupported_error() {
+        let mut config = test_config();
+        config.fwtype = crate::config::FirewallType::Iptables;
+        let fw = FirewallManager::new(&config);
+
+        let err = fw
+            .remove()
+            .await
+            .expect_err("iptables backend must not report successful cleanup");
+
+        assert!(
+            matches!(err, ZapretError::FirewallError(ref message) if message.contains("iptables backend is not implemented")),
+            "unexpected error: {err}"
+        );
     }
 }
