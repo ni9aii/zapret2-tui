@@ -28,7 +28,6 @@ impl Tab {
         }
     }
 
-    #[allow(dead_code)]
     pub fn index(self) -> usize {
         match self {
             Tab::Status => 0,
@@ -219,32 +218,26 @@ impl App {
         }
     }
 
-    #[allow(dead_code)]
     pub fn daemon_pid(&self) -> Option<u32> {
         self.controller.daemon_pid()
     }
 
-    #[allow(dead_code)]
     pub fn binary_path(&self) -> String {
         self.controller.config().nfqws2_bin().display().to_string()
     }
 
-    #[allow(dead_code)]
     pub fn config_path(&self) -> String {
         self.controller.config().config_path.display().to_string()
     }
 
-    #[allow(dead_code)]
     pub fn queue_number(&self) -> u16 {
         self.controller.config().qnum
     }
 
-    #[allow(dead_code)]
     pub fn desync_mark(&self) -> u32 {
         self.controller.config().desync_mark
     }
 
-    #[allow(dead_code)]
     pub fn postnat_mark(&self) -> u32 {
         self.controller.config().desync_mark_postnat
     }
