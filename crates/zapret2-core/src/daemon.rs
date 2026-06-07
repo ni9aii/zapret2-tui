@@ -39,7 +39,7 @@ pub struct DaemonManager {
     bin_path: PathBuf,
     opts: String,
     qnum: u16,
-    #[allow(dead_code)]
+    pid_file: PathBuf,
     child: Option<Child>,
     log_tx: Option<mpsc::UnboundedSender<String>>,
 }
@@ -50,6 +50,7 @@ impl DaemonManager {
             bin_path: config.nfqws2_bin(),
             opts: config.nfqws2_opt.clone(),
             qnum: config.qnum,
+            pid_file: PathBuf::from(NFQWS2_PID_FILE),
             child: None,
             log_tx: None,
         }
@@ -69,7 +70,7 @@ impl DaemonManager {
         #[cfg(unix)]
         {
             use std::fs;
-            if let Ok(pid_str) = fs::read_to_string(NFQWS2_PID_FILE) {
+            if let Ok(pid_str) = fs::read_to_string(&self.pid_file) {
                 if let Ok(pid) = pid_str.trim().parse::<i32>() {
                     // Validate PID is reasonable (must be positive)
                     if pid <= 0 {
@@ -177,7 +178,7 @@ impl DaemonManager {
 
         // Write pid file for later tracking
         if let Some(pid) = child.id() {
-            let _ = std::fs::write(NFQWS2_PID_FILE, pid.to_string());
+            let _ = std::fs::write(&self.pid_file, pid.to_string());
         }
 
         self.child = Some(child);
@@ -214,8 +215,8 @@ impl DaemonManager {
                     warn!("failed to stop nfqws2: {e}");
                 }
             }
-            let _ = std::fs::remove_file(NFQWS2_PID_FILE);
         }
+        let _ = std::fs::remove_file(&self.pid_file);
         Ok(())
     }
 }
@@ -229,9 +230,26 @@ mod tests {
     #[test]
     fn test_is_running_returns_false_when_no_pid_file() {
         let config = ZapretConfig::default_with_base(PathBuf::from("/tmp/test"));
-        let manager = DaemonManager::new(&config);
-        // Clean up any leftover pid file
-        let _ = std::fs::remove_file(NFQWS2_PID_FILE);
+        let mut manager = DaemonManager::new(&config);
+        let tempdir = tempfile::tempdir().unwrap();
+        manager.pid_file = tempdir.path().join("nfqws2.pid");
+
         assert!(!manager.is_running());
+    }
+
+    #[tokio::test]
+    async fn stop_removes_stale_pid_file_when_child_is_not_tracked() {
+        let config = ZapretConfig::default_with_base(PathBuf::from("/tmp/test"));
+        let mut manager = DaemonManager::new(&config);
+        let tempdir = tempfile::tempdir().unwrap();
+        manager.pid_file = tempdir.path().join("nfqws2.pid");
+        std::fs::write(&manager.pid_file, "999999").unwrap();
+
+        manager.stop().await.unwrap();
+
+        assert!(
+            !manager.pid_file.exists(),
+            "stop must remove stale pid files even when this process did not spawn the child"
+        );
     }
 }
