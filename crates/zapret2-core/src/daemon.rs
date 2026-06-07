@@ -7,6 +7,7 @@ use std::process::Stdio;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
+use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 use crate::{config::ZapretConfig, Result, ZapretError};
@@ -40,6 +41,7 @@ pub struct DaemonManager {
     qnum: u16,
     #[allow(dead_code)]
     child: Option<Child>,
+    log_tx: Option<mpsc::UnboundedSender<String>>,
 }
 
 impl DaemonManager {
@@ -49,7 +51,17 @@ impl DaemonManager {
             opts: config.nfqws2_opt.clone(),
             qnum: config.qnum,
             child: None,
+            log_tx: None,
         }
+    }
+
+    /// Set the channel used to stream nfqws2 stdout/stderr into the TUI.
+    pub fn set_log_channel(&mut self, tx: mpsc::UnboundedSender<String>) {
+        self.log_tx = Some(tx);
+    }
+
+    pub fn pid(&self) -> Option<u32> {
+        self.child.as_ref().and_then(|child| child.id())
     }
 
     pub fn is_running(&self) -> bool {
@@ -139,8 +151,12 @@ impl DaemonManager {
         // Spawn stdout/stderr log capture task
         if let Some(stdout) = child.stdout.take() {
             let mut reader = BufReader::new(stdout).lines();
+            let log_tx = self.log_tx.clone();
             tokio::spawn(async move {
                 while let Ok(Some(line)) = reader.next_line().await {
+                    if let Some(tx) = &log_tx {
+                        let _ = tx.send(format!("[nfqws] {line}"));
+                    }
                     tracing::info!("nfqws2: {}", line);
                 }
             });
@@ -148,8 +164,12 @@ impl DaemonManager {
 
         if let Some(stderr) = child.stderr.take() {
             let mut reader = BufReader::new(stderr).lines();
+            let log_tx = self.log_tx.clone();
             tokio::spawn(async move {
                 while let Ok(Some(line)) = reader.next_line().await {
+                    if let Some(tx) = &log_tx {
+                        let _ = tx.send(format!("[nfqws/err] {line}"));
+                    }
                     tracing::warn!("nfqws2 stderr: {}", line);
                 }
             });

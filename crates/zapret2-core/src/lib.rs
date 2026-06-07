@@ -33,6 +33,7 @@ pub mod profile;
 
 use std::path::PathBuf;
 use thiserror::Error;
+use tokio::sync::mpsc;
 
 /// Errors that can occur when managing zapret2.
 #[derive(Error, Debug)]
@@ -92,6 +93,7 @@ pub struct ZapretController {
     config: config::ZapretConfig,
     daemon: daemon::DaemonManager,
     firewall: firewall::FirewallManager,
+    log_rx: Option<mpsc::UnboundedReceiver<String>>,
 }
 
 impl ZapretController {
@@ -100,14 +102,30 @@ impl ZapretController {
     /// If `config_path` is `None`, uses `DEFAULT_CONFIG_PATH`.
     pub fn new(config_path: Option<PathBuf>) -> Result<Self> {
         let config = config::ZapretConfig::load(config_path)?;
-        let daemon = daemon::DaemonManager::new(&config);
+        let (log_tx, log_rx) = mpsc::unbounded_channel();
+        let mut daemon = daemon::DaemonManager::new(&config);
+        daemon.set_log_channel(log_tx);
         let firewall = firewall::FirewallManager::new(&config);
 
         Ok(Self {
             config,
             daemon,
             firewall,
+            log_rx: Some(log_rx),
         })
+    }
+
+    /// Get the nfqws2 log receiver. Can only be called once.
+    pub fn take_log_receiver(&mut self) -> Option<mpsc::UnboundedReceiver<String>> {
+        self.log_rx.take()
+    }
+
+    pub fn config(&self) -> &config::ZapretConfig {
+        &self.config
+    }
+
+    pub fn daemon_pid(&self) -> Option<u32> {
+        self.daemon.pid()
     }
 
     /// Returns current status of daemon and firewall.
