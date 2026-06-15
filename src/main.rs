@@ -16,6 +16,7 @@ use tracing::info;
 use zapret2_core::privilege::PrivilegeMode;
 
 mod app;
+mod logging;
 mod modal;
 mod ui;
 
@@ -69,8 +70,12 @@ async fn main() -> Result<()> {
     })
     .map_err(|e| anyhow::anyhow!("Failed to set Ctrl+C handler: {}", e))?;
 
-    tracing_subscriber::fmt::init();
-    info!("starting zapret2-tui");
+    // Log to a file: the TUI owns the terminal, so stdout/stderr logging would
+    // corrupt the rendered UI. Warn (before taking the screen) if it fails.
+    match logging::init() {
+        Ok(path) => info!("starting zapret2-tui; logging to {}", path.display()),
+        Err(e) => eprintln!("zapret2-tui: file logging disabled ({e})"),
+    }
 
     stdout().execute(EnterAlternateScreen)?;
     enable_raw_mode()?;
