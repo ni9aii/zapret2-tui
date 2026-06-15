@@ -211,6 +211,52 @@ impl DaemonManager {
         Ok(())
     }
 
+    /// Start nfqws2 **detached**: spawn the process, write its pid file, then
+    /// drop the child handle without tracking it. The process keeps running
+    /// after this manager (and its owning binary) exits — required for the
+    /// privileged helper, which spawns nfqws2 as root and then exits while the
+    /// daemon stays up.
+    ///
+    /// Unlike [`start`](Self::start) there is no `kill_on_drop` and no log
+    /// streaming: stdout/stderr are inherited, so output goes to the helper's
+    /// stdio (journal/systemd when run under pkexec) rather than the TUI.
+    pub async fn start_detached(&self) -> Result<()> {
+        if self.is_running() {
+            warn!("nfqws2 is already running");
+            return Ok(());
+        }
+
+        if !self.bin_path.exists() {
+            return Err(ZapretError::DaemonNotFound(self.bin_path.clone()));
+        }
+
+        let mut cmd = Command::new(&self.bin_path);
+        cmd.arg(format!("--qnum={}", self.qnum));
+        for arg in Self::validate_opts(&self.opts)? {
+            cmd.arg(arg);
+        }
+        // Inherit stdio; do NOT kill_on_drop — the daemon must outlive us.
+        cmd.stdin(Stdio::null());
+
+        let child = cmd
+            .spawn()
+            .map_err(|e| ZapretError::ProcessError(format!("failed to spawn nfqws2: {e}")))?;
+
+        if let Some(pid) = child.id() {
+            std::fs::write(&self.pid_file, pid.to_string())
+                .map_err(|e| ZapretError::ProcessError(format!("failed to write pid file: {e}")))?;
+            info!("nfqws2 started detached (pid {pid})");
+        } else {
+            warn!("nfqws2 spawned but pid was unavailable; pid file not written");
+        }
+
+        // Drop the handle without waiting or killing: with kill_on_drop unset
+        // (tokio's default) the process keeps running, is reparented to init
+        // when we exit, and is reaped there.
+        drop(child);
+        Ok(())
+    }
+
     pub async fn stop(&mut self) -> Result<()> {
         // Number of 100ms polling intervals to wait for graceful shutdown
         // before escalating to SIGKILL (~3 seconds total).

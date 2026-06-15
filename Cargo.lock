@@ -2526,6 +2526,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "zapret2-helper"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "zapret2-core",
+]
+
+[[package]]
 name = "zapret2-tui"
 version = "0.1.0"
 dependencies = [

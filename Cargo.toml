@@ -28,6 +28,7 @@ zapret2-core.workspace = true
 resolver = "2"
 members = [
     "crates/zapret2-core",
+    "crates/zapret2-helper",
 ]
 
 [workspace.package]
