@@ -16,6 +16,7 @@ use tracing::info;
 use zapret2_core::privilege::PrivilegeMode;
 
 mod app;
+mod modal;
 mod ui;
 
 use app::App;

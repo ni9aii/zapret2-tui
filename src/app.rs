@@ -11,6 +11,8 @@ use zapret2_core::privilege::PrivilegeMode;
 use zapret2_core::profile::{Profile, ProfileManager};
 use zapret2_core::{Status, ZapretController, DEFAULT_ZAPRET_BASE};
 
+use crate::modal::{Modal, ProfileForm};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Status,
@@ -66,7 +68,9 @@ pub struct App {
     pub profile_list_selected: usize,
     pub active_profile: Option<String>,
     pub show_help: bool,
+    pub modal: Modal,
     controller: ZapretController,
+    profile_manager: ProfileManager,
     log_rx: mpsc::UnboundedReceiver<String>,
 }
 
@@ -108,7 +112,9 @@ impl App {
             profile_list_selected: 0,
             active_profile,
             show_help: false,
+            modal: Modal::None,
             controller,
+            profile_manager,
             log_rx,
         })
     }
@@ -116,6 +122,12 @@ impl App {
     pub async fn handle_key(&mut self, key: KeyCode) -> Result<bool> {
         if self.show_help {
             self.show_help = false;
+            return Ok(false);
+        }
+
+        // A modal captures all input until dismissed.
+        if self.modal.is_open() {
+            self.handle_modal_key(key);
             return Ok(false);
         }
 
@@ -134,9 +146,130 @@ impl App {
                 self.profile_list_selected = self.profile_list_selected.saturating_sub(1);
             }
             KeyCode::Enter if self.current_tab == Tab::Profiles => self.select_profile(),
+            KeyCode::Char('n') | KeyCode::Char('N') if self.current_tab == Tab::Profiles => {
+                self.modal = Modal::Form(ProfileForm::create());
+            }
+            KeyCode::Char('e') | KeyCode::Char('E') if self.current_tab == Tab::Profiles => {
+                if let Some(profile) = self.profiles.get(self.profile_list_selected) {
+                    self.modal = Modal::Form(ProfileForm::edit(profile));
+                }
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') if self.current_tab == Tab::Profiles => {
+                if let Some(profile) = self.profiles.get(self.profile_list_selected) {
+                    self.modal = Modal::DeleteConfirm {
+                        name: profile.name.clone(),
+                    };
+                }
+            }
             _ => {}
         }
         Ok(false)
+    }
+
+    /// Handle a key while a modal is open.
+    fn handle_modal_key(&mut self, key: KeyCode) {
+        match &mut self.modal {
+            Modal::Form(form) => match key {
+                KeyCode::Esc => self.modal = Modal::None,
+                KeyCode::Enter => self.submit_form(),
+                KeyCode::Tab | KeyCode::Down => form.focus_next(),
+                KeyCode::BackTab | KeyCode::Up => form.focus_prev(),
+                KeyCode::Backspace => form.backspace(),
+                KeyCode::Char(c) => form.input(c),
+                _ => {}
+            },
+            Modal::DeleteConfirm { .. } => match key {
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => self.confirm_delete(),
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => self.modal = Modal::None,
+                _ => {}
+            },
+            Modal::None => {}
+        }
+    }
+
+    /// Validate and persist the open profile form. On validation failure the
+    /// form stays open with an error; nothing is written. On a write failure
+    /// (e.g. no permission for /opt/zapret2/profiles) the form also stays open.
+    fn submit_form(&mut self) {
+        let Modal::Form(form) = &self.modal else {
+            return;
+        };
+        // Clone out so we can freely mutate `self` below (the form borrows
+        // `self.modal`).
+        let form = form.clone();
+        let profile = match form.validate() {
+            Ok(p) => p,
+            Err(e) => {
+                if let Modal::Form(form) = &mut self.modal {
+                    form.error = Some(e);
+                }
+                return;
+            }
+        };
+
+        if let Err(e) = self.profile_manager.save_profile(&profile) {
+            if let Modal::Form(form) = &mut self.modal {
+                form.error = Some(format!("save failed: {e}"));
+            }
+            return;
+        }
+        // A rename (edit where the name changed) removes the old file.
+        let is_edit = form.editing.is_some();
+        if let Some(old) = form.editing.filter(|old| *old != profile.name) {
+            if let Err(e) = self.profile_manager.remove(&old) {
+                self.add_log(&format!(
+                    "renamed profile but failed to remove '{old}': {e}"
+                ));
+            }
+        }
+
+        let verb = if is_edit { "updated" } else { "created" };
+        self.status_message = format!("Profile '{}' {verb}.", profile.name);
+        self.modal = Modal::None;
+        self.refresh_profiles(Some(&profile.name));
+        let msg = self.status_message.clone();
+        self.add_log(&msg);
+    }
+
+    /// Delete the profile named by the open delete-confirm modal.
+    fn confirm_delete(&mut self) {
+        let Modal::DeleteConfirm { name } = &self.modal else {
+            return;
+        };
+        let name = name.clone();
+        match self.profile_manager.remove(&name) {
+            Ok(()) => {
+                self.status_message = format!("Profile '{name}' deleted.");
+                if self.active_profile.as_deref() == Some(name.as_str()) {
+                    self.active_profile = None;
+                    self.status.current_profile = None;
+                }
+            }
+            Err(e) => {
+                self.status_message = format!("Failed to delete '{name}': {e}");
+            }
+        }
+        self.modal = Modal::None;
+        self.refresh_profiles(None);
+        let msg = self.status_message.clone();
+        self.add_log(&msg);
+    }
+
+    /// Rebuild the cached profile list from the manager, keeping the selection
+    /// on `keep` when given (else clamped into range).
+    fn refresh_profiles(&mut self, keep: Option<&str>) {
+        self.profiles = self.profile_manager.list().into_iter().cloned().collect();
+        self.profiles.sort_by(|a, b| a.name.cmp(&b.name));
+        self.profile_list_selected = match keep {
+            Some(name) => self
+                .profiles
+                .iter()
+                .position(|p| p.name == name)
+                .unwrap_or(0),
+            None => self
+                .profile_list_selected
+                .min(self.profiles.len().saturating_sub(1)),
+        };
     }
 
     pub async fn toggle_status(&mut self) -> Result<()> {

@@ -9,6 +9,7 @@ use ratatui::{
 };
 
 use crate::app::{App, Tab};
+use crate::modal::{Modal, ProfileForm};
 
 pub fn draw(f: &mut Frame, app: &App) {
     let area = f.area();
@@ -24,6 +25,12 @@ pub fn draw(f: &mut Frame, app: &App) {
     draw_header(f, app, chunks[0]);
     draw_content(f, app, chunks[1]);
     draw_footer(f, app, chunks[2]);
+
+    match &app.modal {
+        Modal::Form(form) => draw_profile_form(f, form, area),
+        Modal::DeleteConfirm { name } => draw_delete_confirm(f, name, area),
+        Modal::None => {}
+    }
 
     if app.show_help {
         draw_help(f, area);
@@ -190,7 +197,7 @@ fn draw_profiles_tab(f: &mut Frame, app: &App, area: Rect) {
     )
     .block(
         Block::default()
-            .title(" Profiles (↑/↓, Enter select) ")
+            .title(" Profiles (↑/↓ move, Enter select, n new, e edit, d delete) ")
             .borders(Borders::ALL),
     );
 
@@ -263,20 +270,28 @@ fn draw_settings_tab(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(settings, area);
 }
 
-fn draw_footer(f: &mut Frame, _app: &App, area: Rect) {
-    let footer = Paragraph::new(Line::from(vec![
+fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
+    let mut spans = vec![
         Span::styled("Tab", Style::default().fg(Color::Cyan)),
         Span::raw(" next | "),
         Span::styled("s", Style::default().fg(Color::Cyan)),
         Span::raw(" start/stop | "),
         Span::styled("r", Style::default().fg(Color::Cyan)),
         Span::raw(" restart | "),
+    ];
+    if app.current_tab == Tab::Profiles {
+        spans.extend([
+            Span::styled("n/e/d", Style::default().fg(Color::Cyan)),
+            Span::raw(" new/edit/del | "),
+        ]);
+    }
+    spans.extend([
         Span::styled("h", Style::default().fg(Color::Cyan)),
         Span::raw(" help | "),
         Span::styled("q", Style::default().fg(Color::Cyan)),
         Span::raw(" quit"),
-    ]))
-    .block(Block::default().borders(Borders::TOP));
+    ]);
+    let footer = Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::TOP));
     f.render_widget(footer, area);
 }
 
@@ -292,8 +307,11 @@ fn draw_help(f: &mut Frame, area: Rect) {
         Line::from("r                Restart daemon"),
         Line::from("↑/↓              Navigate profiles"),
         Line::from("Enter            Select highlighted profile"),
+        Line::from("n / e / d        New / edit / delete profile"),
         Line::from("h / ?            This help"),
         Line::from("q / Esc          Quit"),
+        Line::from(""),
+        Line::from("In a dialog: Tab/↑↓ move field, Enter confirm, Esc cancel"),
         Line::from(""),
         Line::from("Press any key to close"),
     ];
@@ -303,6 +321,90 @@ fn draw_help(f: &mut Frame, area: Rect) {
         .block(Block::default().title(" Help ").borders(Borders::ALL));
     f.render_widget(Clear, popup_area);
     f.render_widget(help, popup_area);
+}
+
+fn draw_profile_form(f: &mut Frame, form: &ProfileForm, area: Rect) {
+    let labels = ProfileForm::field_labels();
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, label) in labels.iter().enumerate() {
+        let focused = i == form.focus;
+        let marker = if focused { "> " } else { "  " };
+        let label_style = if focused {
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        let value = form.field_value(i);
+        let value_span = if focused {
+            Span::styled(format!("{value}_"), Style::default().fg(Color::White))
+        } else {
+            Span::raw(value.to_string())
+        };
+        lines.push(Line::from(vec![
+            Span::raw(marker),
+            Span::styled(format!("{label:<12}"), label_style),
+            value_span,
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    if let Some(err) = &form.error {
+        lines.push(Line::from(Span::styled(
+            format!("✗ {err}"),
+            Style::default().fg(Color::Red),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "Hostlists: comma or space separated",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Tab/↑↓ move · Enter save · Esc cancel",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let popup_area = centered_rect(64, 56, area);
+    let form_widget = Paragraph::new(Text::from(lines)).block(
+        Block::default()
+            .title(format!(" {} ", form.title()))
+            .borders(Borders::ALL),
+    );
+    f.render_widget(Clear, popup_area);
+    f.render_widget(form_widget, popup_area);
+}
+
+fn draw_delete_confirm(f: &mut Frame, name: &str, area: Rect) {
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("Delete profile "),
+            Span::styled(
+                format!("'{name}'"),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("?"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "y / Enter  confirm     n / Esc  cancel",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    let popup_area = centered_rect(50, 24, area);
+    let widget = Paragraph::new(Text::from(lines))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .title(" Confirm delete ")
+                .borders(Borders::ALL),
+        );
+    f.render_widget(Clear, popup_area);
+    f.render_widget(widget, popup_area);
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
