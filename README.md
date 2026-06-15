@@ -17,15 +17,21 @@ A terminal-based interface for managing [zapret2](https://github.com/bol-van/zap
 
 - **Real-time status monitoring** — See daemon and firewall state at a glance
 - **One-key control** — Start/stop/restart with `s`, `r`, `q`
+- **Profile management** — Create, edit, delete, and apply profiles from the UI
+- **Runs as a normal user** — Privileged actions go through `pkexec`/polkit;
+  `direct` mode for root shells and servers
 - **Log streaming** — Live output from nfqws2
 - **Multi-tab interface** — Status, Profiles, Logs, Settings
 - **Safe defaults** — Graceful handling of missing/misconfigured state
 
 ### Requirements
 
-- Linux (nftables or iptables + NFQUEUE kernel support)
+- Linux with **nftables** (iptables backend is planned; selecting it fails
+  explicitly rather than silently doing nothing) and NFQUEUE kernel support
 - Rust toolchain (for building)
 - zapret2 installed at `/opt/zapret2` (configurable)
+- `pkexec` + polkit for running as a normal user (optional; `direct` mode works
+  without it)
 
 ### Installation
 
@@ -45,11 +51,14 @@ sudo install -m 755 target/release/zapret2-tui /usr/local/bin/
 ### Usage
 
 ```bash
-# Run with default config
+# Run with default config (privilege mode: auto)
 zapret2-tui
 
 # Run with custom config
 zapret2-tui -c /path/to/config
+
+# Force a privilege mode: auto (default) | pkexec | direct
+zapret2-tui --privilege-mode=direct   # root shells / servers, no pkexec
 
 # Show help
 zapret2-tui --help
@@ -62,7 +71,53 @@ zapret2-tui --help
 | `s` | Toggle start/stop |
 | `r` | Restart zapret2 |
 | `Tab` / `Shift+Tab` | Switch tabs |
-| `q` | Quit |
+| `↑` / `↓` | Navigate profiles |
+| `Enter` | Apply highlighted profile |
+| `n` / `e` / `d` | New / edit / delete profile (Profiles tab) |
+| `h` / `?` | Help overlay |
+| `q` / `Esc` | Quit |
+
+In a dialog: `Tab` / `↑↓` move between fields, `Enter` confirms, `Esc` cancels.
+
+### Privileges
+
+Firewall and daemon control need root. `zapret2-tui` runs unprivileged and
+escalates per action:
+
+- `--privilege-mode=auto` (default) — direct if already root, otherwise
+  `pkexec`.
+- `--privilege-mode=pkexec` — always use `pkexec` (a polkit prompt appears).
+- `--privilege-mode=direct` — never use `pkexec`; for root shells, servers, and
+  minimal TTYs.
+
+`pkexec` invokes the small `zapret2-helper` binary. Install it and the polkit
+policy (see `packaging/README.md`):
+
+```bash
+cargo build --release
+sudo install -Dm755 target/release/zapret2-helper /usr/libexec/zapret2-helper
+sudo install -Dm644 packaging/polkit/io.github.ni9aii.zapret2.policy \
+  /usr/share/polkit-1/actions/io.github.ni9aii.zapret2.policy
+```
+
+A cancelled polkit prompt is reported distinctly and leaves state unchanged.
+
+### Logs
+
+Logs are written to a file (never the terminal, which the TUI owns):
+
+```text
+$XDG_STATE_HOME/zapret2-tui/zapret2-tui.log
+# or, if unset: ~/.local/state/zapret2-tui/zapret2-tui.log
+```
+
+Set `RUST_LOG` to change verbosity (default `info`).
+
+### Documentation
+
+- [`docs/architecture.md`](docs/architecture.md) — crates and data flow
+- [`docs/privilege-model.md`](docs/privilege-model.md) — pkexec/polkit, modes
+- [`docs/profile-management.md`](docs/profile-management.md) — profiles & CRUD
 
 ### Configuration
 
@@ -81,11 +136,18 @@ DESYNC_MARK=0x40000000
 ### Architecture
 
 ```
-src/main.rs           Entry point, CLI args via clap
-src/app.rs            App state, controller integration
+src/main.rs           Entry point, CLI args via clap, file logging
+src/app.rs            App state, controller integration, key handling
 src/ui.rs             ratatui rendering
-crates/zapret2-core   Core library (config, daemon, firewall, profile)
+src/modal.rs          Profile create/edit/delete modal state + validation
+src/logging.rs        File-based tracing setup (XDG state dir)
+crates/zapret2-core   Core library (config, daemon, firewall, profile,
+                      actions, privilege)
+crates/zapret2-helper Minimal privileged helper, invoked via pkexec
+packaging/polkit      polkit policy for the helper
 ```
+
+See [`docs/architecture.md`](docs/architecture.md) for details.
 
 ### Development
 
@@ -116,15 +178,21 @@ Dual-licensed under MIT OR Apache-2.0.
 
 - **Мониторинг в реальном времени** — Состояние демона и firewall на виду
 - **Управление одной клавишей** — Start/stop/restart: `s`, `r`, `q`
+- **Управление профилями** — Создание, редактирование, удаление и применение из UI
+- **Запуск от обычного пользователя** — Привилегированные действия через
+  `pkexec`/polkit; режим `direct` для root и серверов
 - **Логи в реальном времени** — Вывод nfqws2
 - **Много вкладок** — Status, Profiles, Logs, Settings
 - **Безопасные дефолты** — Корректная обработка отсутствующей конфигурации
 
 ### Требования
 
-- Linux (nftables или iptables + поддержка NFQUEUE в ядре)
+- Linux с **nftables** (бэкенд iptables запланирован; его выбор завершается
+  явной ошибкой, а не тихим бездействием) и поддержкой NFQUEUE в ядре
 - Rust toolchain (для сборки)
 - zapret2 установлен в `/opt/zapret2` (настраивается)
+- `pkexec` + polkit для запуска от обычного пользователя (необязательно; режим
+  `direct` работает без них)
 
 ### Установка
 
@@ -144,11 +212,14 @@ sudo install -m 755 target/release/zapret2-tui /usr/local/bin/
 ### Использование
 
 ```bash
-# Запуск с конфигом по умолчанию
+# Запуск с конфигом по умолчанию (режим привилегий: auto)
 zapret2-tui
 
 # Свой конфиг
 zapret2-tui -c /path/to/config
+
+# Режим привилегий: auto (по умолчанию) | pkexec | direct
+zapret2-tui --privilege-mode=direct   # root / серверы, без pkexec
 
 # Справка
 zapret2-tui --help
@@ -161,7 +232,46 @@ zapret2-tui --help
 | `s` | Переключить start/stop |
 | `r` | Перезапустить zapret2 |
 | `Tab` / `Shift+Tab` | Переключение вкладок |
-| `q` | Выход |
+| `↑` / `↓` | Навигация по профилям |
+| `Enter` | Применить выбранный профиль |
+| `n` / `e` / `d` | Новый / редактировать / удалить профиль (вкладка Profiles) |
+| `h` / `?` | Справка |
+| `q` / `Esc` | Выход |
+
+В диалоге: `Tab` / `↑↓` — между полями, `Enter` — подтвердить, `Esc` — отмена.
+
+### Привилегии
+
+Управление firewall и демоном требует root. `zapret2-tui` работает без
+привилегий и повышает их на каждое действие:
+
+- `--privilege-mode=auto` (по умолчанию) — напрямую, если уже root, иначе
+  `pkexec`.
+- `--privilege-mode=pkexec` — всегда через `pkexec` (появляется запрос polkit).
+- `--privilege-mode=direct` — без `pkexec`; для root, серверов и минимальных TTY.
+
+`pkexec` вызывает небольшой бинарь `zapret2-helper`. Установите его и polkit-политику
+(см. `packaging/README.md`):
+
+```bash
+cargo build --release
+sudo install -Dm755 target/release/zapret2-helper /usr/libexec/zapret2-helper
+sudo install -Dm644 packaging/polkit/io.github.ni9aii.zapret2.policy \
+  /usr/share/polkit-1/actions/io.github.ni9aii.zapret2.policy
+```
+
+Отмена запроса polkit сообщается отдельно и не меняет состояние.
+
+### Логи
+
+Логи пишутся в файл (не в терминал, которым владеет TUI):
+
+```text
+$XDG_STATE_HOME/zapret2-tui/zapret2-tui.log
+# или, если не задано: ~/.local/state/zapret2-tui/zapret2-tui.log
+```
+
+Уровень задаётся переменной `RUST_LOG` (по умолчанию `info`).
 
 ### Конфигурация
 
@@ -177,13 +287,24 @@ FWTYPE=nftables
 DESYNC_MARK=0x40000000
 ```
 
+### Документация
+
+- [`docs/architecture.md`](docs/architecture.md) — крейты и поток данных
+- [`docs/privilege-model.md`](docs/privilege-model.md) — pkexec/polkit, режимы
+- [`docs/profile-management.md`](docs/profile-management.md) — профили и CRUD
+
 ### Архитектура
 
 ```
-src/main.rs           Точка входа, CLI через clap
-src/app.rs            Состояние приложения, контроллер
+src/main.rs           Точка входа, CLI через clap, логирование в файл
+src/app.rs            Состояние приложения, контроллер, обработка клавиш
 src/ui.rs             Рендеринг ratatui
-crates/zapret2-core   Библиотека (config, daemon, firewall, profile)
+src/modal.rs          Состояние модалок профилей + валидация
+src/logging.rs        Логирование в файл (XDG state dir)
+crates/zapret2-core   Библиотека (config, daemon, firewall, profile,
+                      actions, privilege)
+crates/zapret2-helper Минимальный привилегированный helper (через pkexec)
+packaging/polkit      polkit-политика для helper
 ```
 
 ### Разработка
