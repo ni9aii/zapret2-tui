@@ -65,41 +65,49 @@ impl DaemonManager {
         self.child.as_ref().and_then(|child| child.id())
     }
 
-    pub fn is_running(&self) -> bool {
-        // Check if process exists by pid file
-        #[cfg(unix)]
-        {
-            use std::fs;
-            if let Ok(pid_str) = fs::read_to_string(&self.pid_file) {
-                if let Ok(pid) = pid_str.trim().parse::<i32>() {
-                    // Validate PID is reasonable (must be positive)
-                    if pid <= 0 {
-                        return false;
-                    }
-                    // kill(pid, 0) returns 0 on success, -1 on error with errno set
-                    let result = unsafe { libc::kill(pid, 0) };
-                    if result == 0 {
-                        return true;
-                    }
-                    // kill returned -1 with errno - check for ESRCH (no such process)
-                    // errno=3 (ESRCH) means process doesn't exist, which is OK
-                    // Other errors (EACCES, etc.) should not be ignored
-                    #[cfg(debug_assertions)]
-                    let errno = unsafe { *libc::__errno_location() };
-                    // ESRCH = 3 (no such process) - process not running is expected
-                    // Any other error while kill returned -1 should be logged
-                    #[cfg(debug_assertions)]
-                    if errno != 3 {
-                        warn!("is_running: unexpected errno from kill: {}", errno);
-                    }
-                }
+    /// Read and validate the pid stored in the pid file.
+    ///
+    /// Returns the pid only when the file exists and contains a single
+    /// positive integer. Missing files, malformed contents, and non-positive
+    /// values all yield `None`.
+    fn read_pid_file(&self) -> Option<i32> {
+        let contents = std::fs::read_to_string(&self.pid_file).ok()?;
+        let pid = contents.trim().parse::<i32>().ok()?;
+        (pid > 0).then_some(pid)
+    }
+
+    /// Check whether a process with the given pid is currently alive.
+    ///
+    /// Uses `kill(pid, 0)`, which sends no signal but performs the same
+    /// existence/permission checks as a real signal:
+    /// - `0`      → the process exists and we may signal it → alive.
+    /// - `EPERM`  → the process exists but is owned by another user → alive.
+    /// - `ESRCH`  → no such process → dead.
+    #[cfg(unix)]
+    fn pid_is_alive(pid: i32) -> bool {
+        if pid <= 0 {
+            return false;
+        }
+        if unsafe { libc::kill(pid, 0) } == 0 {
+            return true;
+        }
+        match std::io::Error::last_os_error().raw_os_error() {
+            Some(libc::EPERM) => true,
+            Some(libc::ESRCH) => false,
+            other => {
+                warn!("pid_is_alive: unexpected errno {:?} for pid {}", other, pid);
+                false
             }
-            false
         }
-        #[cfg(not(unix))]
-        {
-            false
-        }
+    }
+
+    #[cfg(not(unix))]
+    fn pid_is_alive(_pid: i32) -> bool {
+        false
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.read_pid_file().is_some_and(Self::pid_is_alive)
     }
 
     /// Validates that an argument is in the whitelist (prevents command injection)
@@ -188,35 +196,90 @@ impl DaemonManager {
     }
 
     pub async fn stop(&mut self) -> Result<()> {
-        if let Some(mut child) = self.child.take() {
-            info!("stopping nfqws2");
-            // Try graceful shutdown first with SIGTERM
-            #[cfg(unix)]
-            {
-                use nix::sys::signal::kill;
-                use nix::sys::signal::Signal;
-                use nix::unistd::Pid;
+        // Number of 100ms polling intervals to wait for graceful shutdown
+        // before escalating to SIGKILL (~3 seconds total).
+        const GRACE_POLLS: u32 = 30;
+        const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 
-                let pid = Pid::from_raw(child.id().unwrap_or(0) as i32);
-                let _ = kill(pid, Signal::SIGTERM);
+        #[cfg(unix)]
+        {
+            use nix::sys::signal::{kill, Signal};
+            use nix::unistd::Pid;
 
-                // Wait briefly for graceful shutdown
-                let wait_timeout = tokio::time::Duration::from_secs(3);
-                tokio::time::sleep(wait_timeout).await;
-            }
-
-            // Force kill if still running
-            match child.kill().await {
-                Ok(_) => {
-                    let _ = child.wait().await;
-                    info!("nfqws2 stopped");
+            if let Some(mut child) = self.child.take() {
+                // We own this process: SIGTERM, poll via try_wait (which also
+                // reaps on exit so we never read a zombie), then SIGKILL.
+                if let Some(id) = child.id() {
+                    info!("stopping nfqws2 (tracked pid {id})");
+                    let _ = kill(Pid::from_raw(id as i32), Signal::SIGTERM);
                 }
-                Err(e) => {
-                    warn!("failed to stop nfqws2: {e}");
+
+                let mut exited = false;
+                for _ in 0..GRACE_POLLS {
+                    match child.try_wait() {
+                        Ok(Some(_)) => {
+                            exited = true;
+                            break;
+                        }
+                        Ok(None) => tokio::time::sleep(POLL_INTERVAL).await,
+                        Err(e) => {
+                            warn!("failed to poll nfqws2 status: {e}");
+                            break;
+                        }
+                    }
+                }
+
+                if !exited {
+                    warn!("nfqws2 did not exit after SIGTERM; sending SIGKILL");
+                    let _ = child.kill().await;
+                }
+                let _ = child.wait().await; // reap
+                info!("nfqws2 stopped");
+            } else if let Some(pid) = self.read_pid_file() {
+                // A daemon started by a previous process, discovered via the
+                // pid file. Signal it directly so it can actually be stopped.
+                if Self::pid_is_alive(pid) {
+                    info!("stopping nfqws2 (pidfile pid {pid})");
+                    let npid = Pid::from_raw(pid);
+                    let _ = kill(npid, Signal::SIGTERM);
+
+                    let mut exited = false;
+                    for _ in 0..GRACE_POLLS {
+                        if !Self::pid_is_alive(pid) {
+                            exited = true;
+                            break;
+                        }
+                        tokio::time::sleep(POLL_INTERVAL).await;
+                    }
+
+                    if !exited {
+                        warn!("nfqws2 (pid {pid}) did not exit after SIGTERM; sending SIGKILL");
+                        let _ = kill(npid, Signal::SIGKILL);
+                    }
+                    info!("nfqws2 stopped");
                 }
             }
         }
-        let _ = std::fs::remove_file(&self.pid_file);
+
+        #[cfg(not(unix))]
+        {
+            if let Some(mut child) = self.child.take() {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+            }
+        }
+
+        // Remove the pid file, but never discard one that still points at a
+        // live, unrelated process — that would hide a running daemon.
+        match self.read_pid_file() {
+            Some(pid) if Self::pid_is_alive(pid) => {
+                warn!("pid file points to live process {pid}; leaving it in place");
+            }
+            _ => {
+                let _ = std::fs::remove_file(&self.pid_file);
+            }
+        }
+
         Ok(())
     }
 }
@@ -227,22 +290,77 @@ mod tests {
     use crate::config::ZapretConfig;
     use std::path::PathBuf;
 
-    #[test]
-    fn test_is_running_returns_false_when_no_pid_file() {
+    fn manager_with_pidfile(pid_file: PathBuf) -> DaemonManager {
         let config = ZapretConfig::default_with_base(PathBuf::from("/tmp/test"));
         let mut manager = DaemonManager::new(&config);
+        manager.pid_file = pid_file;
+        manager
+    }
+
+    #[test]
+    fn read_pid_file_parses_valid_positive_pid() {
         let tempdir = tempfile::tempdir().unwrap();
-        manager.pid_file = tempdir.path().join("nfqws2.pid");
+        let manager = manager_with_pidfile(tempdir.path().join("nfqws2.pid"));
+        std::fs::write(&manager.pid_file, "  4242\n").unwrap();
+
+        assert_eq!(manager.read_pid_file(), Some(4242));
+    }
+
+    #[test]
+    fn read_pid_file_rejects_missing_and_malformed_contents() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let manager = manager_with_pidfile(tempdir.path().join("nfqws2.pid"));
+
+        // Missing file.
+        assert_eq!(manager.read_pid_file(), None);
+
+        for bad in ["", "   ", "abc", "0", "-1", "12 34"] {
+            std::fs::write(&manager.pid_file, bad).unwrap();
+            assert_eq!(manager.read_pid_file(), None, "should reject {bad:?}");
+        }
+    }
+
+    #[test]
+    fn pid_is_alive_true_for_current_process() {
+        assert!(DaemonManager::pid_is_alive(std::process::id() as i32));
+    }
+
+    #[test]
+    fn pid_is_alive_false_for_non_positive_pid() {
+        assert!(!DaemonManager::pid_is_alive(0));
+        assert!(!DaemonManager::pid_is_alive(-1));
+    }
+
+    #[tokio::test]
+    async fn pid_is_alive_false_after_child_is_reaped() {
+        let mut child = tokio::process::Command::new("true").spawn().unwrap();
+        let pid = child.id().unwrap() as i32;
+        child.wait().await.unwrap(); // reap so the pid is fully released
+
+        assert!(!DaemonManager::pid_is_alive(pid));
+    }
+
+    #[test]
+    fn test_is_running_returns_false_when_no_pid_file() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let manager = manager_with_pidfile(tempdir.path().join("nfqws2.pid"));
 
         assert!(!manager.is_running());
     }
 
+    #[test]
+    fn is_running_true_when_pidfile_points_to_live_process() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let manager = manager_with_pidfile(tempdir.path().join("nfqws2.pid"));
+        std::fs::write(&manager.pid_file, std::process::id().to_string()).unwrap();
+
+        assert!(manager.is_running());
+    }
+
     #[tokio::test]
     async fn stop_removes_stale_pid_file_when_child_is_not_tracked() {
-        let config = ZapretConfig::default_with_base(PathBuf::from("/tmp/test"));
-        let mut manager = DaemonManager::new(&config);
         let tempdir = tempfile::tempdir().unwrap();
-        manager.pid_file = tempdir.path().join("nfqws2.pid");
+        let mut manager = manager_with_pidfile(tempdir.path().join("nfqws2.pid"));
         std::fs::write(&manager.pid_file, "999999").unwrap();
 
         manager.stop().await.unwrap();
@@ -250,6 +368,33 @@ mod tests {
         assert!(
             !manager.pid_file.exists(),
             "stop must remove stale pid files even when this process did not spawn the child"
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_terminates_tracked_child_and_removes_pidfile() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let mut manager = manager_with_pidfile(tempdir.path().join("nfqws2.pid"));
+
+        let child = tokio::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let pid = child.id().unwrap();
+        std::fs::write(&manager.pid_file, pid.to_string()).unwrap();
+        manager.child = Some(child);
+
+        assert!(manager.is_running(), "child should be detected as running");
+
+        manager.stop().await.unwrap();
+
+        assert!(
+            !DaemonManager::pid_is_alive(pid as i32),
+            "stop must terminate the tracked child"
+        );
+        assert!(
+            !manager.pid_file.exists(),
+            "stop must remove the pid file once the daemon is gone"
         );
     }
 }
