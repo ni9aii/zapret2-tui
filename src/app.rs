@@ -202,12 +202,22 @@ impl App {
     }
 
     pub fn select_profile(&mut self) {
-        if let Some(profile) = self.profiles.get(self.profile_list_selected) {
-            self.active_profile = Some(profile.name.clone());
-            self.status.current_profile = Some(profile.name.clone());
-            self.status_message = format!("Profile '{}' selected.", profile.name);
-            self.add_log(&self.status_message.clone());
+        let Some(profile) = self.profiles.get(self.profile_list_selected).cloned() else {
+            return;
+        };
+        match self.controller.apply_profile(&profile) {
+            Ok(()) => {
+                self.active_profile = Some(profile.name.clone());
+                self.status.current_profile = Some(profile.name.clone());
+                self.status_message = format!("Profile '{}' applied.", profile.name);
+            }
+            Err(e) => {
+                // Leave active profile unchanged on failure.
+                self.status_message = format!("Failed to apply profile '{}': {e}", profile.name);
+            }
         }
+        let msg = self.status_message.clone();
+        self.add_log(&msg);
     }
 
     pub fn add_log(&mut self, msg: &str) {
@@ -240,5 +250,12 @@ impl App {
 
     pub fn postnat_mark(&self) -> u32 {
         self.controller.config().desync_mark_postnat
+    }
+
+    /// Active nfqws2 options as applied to the runtime config. Reflects the
+    /// selected profile, so the Settings tab shows the real runtime effect of
+    /// `apply_profile`.
+    pub fn nfqws_opts(&self) -> &str {
+        &self.controller.config().nfqws2_opt
     }
 }

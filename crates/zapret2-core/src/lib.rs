@@ -160,6 +160,36 @@ impl ZapretController {
         self.stop().await?;
         self.start().await
     }
+
+    /// Apply a profile to the runtime configuration.
+    ///
+    /// Validates the profile, patches the in-memory config (nfqws2 options and
+    /// active profile name) and rebuilds the daemon/firewall managers so the
+    /// next start/restart uses the selected profile. Does not write to
+    /// `/opt/zapret2/config` and does not require root.
+    ///
+    /// On error the configuration is left unchanged, so a failed apply never
+    /// silently mutates runtime state.
+    pub fn apply_profile(&mut self, profile: &profile::Profile) -> Result<()> {
+        // Validate everything before mutating any state.
+        profile::ProfileManager::validate_name(&profile.name)?;
+        daemon::DaemonManager::validate_opts(&profile.nfqws_opts)?;
+
+        self.config.nfqws2_opt = profile.nfqws_opts.clone();
+        self.config.current_profile = Some(profile.name.clone());
+
+        // Preserve any running child/log channel; only refresh derived config.
+        self.daemon.apply_config(&self.config);
+        self.firewall = firewall::FirewallManager::new(&self.config);
+
+        tracing::info!("applied profile '{}'", profile.name);
+        Ok(())
+    }
+
+    /// The currently active profile name, if any.
+    pub fn current_profile(&self) -> Option<&str> {
+        self.config.current_profile.as_deref()
+    }
 }
 
 /// Current status of zapret2 components.
@@ -171,4 +201,57 @@ pub struct Status {
     pub firewall_active: bool,
     /// Current profile name, if any.
     pub current_profile: Option<String>,
+}
+
+#[cfg(test)]
+mod controller_tests {
+    use super::*;
+    use crate::profile::Profile;
+
+    fn controller() -> ZapretController {
+        // A non-existent config path yields the default config without root.
+        ZapretController::new(Some(PathBuf::from("/nonexistent/zapret2/config"))).unwrap()
+    }
+
+    fn profile(name: &str, opts: &str) -> Profile {
+        Profile {
+            name: name.to_string(),
+            description: "test".to_string(),
+            strategy: "test".to_string(),
+            hostlists: vec![],
+            nfqws_opts: opts.to_string(),
+        }
+    }
+
+    #[test]
+    fn apply_profile_sets_active_profile_and_opts() {
+        let mut c = controller();
+        assert_eq!(c.current_profile(), None);
+
+        c.apply_profile(&profile("yt", "--qnum=300 --dpi-desync"))
+            .unwrap();
+
+        assert_eq!(c.current_profile(), Some("yt"));
+        assert_eq!(c.config().nfqws2_opt, "--qnum=300 --dpi-desync");
+    }
+
+    #[test]
+    fn apply_profile_rejects_invalid_name_without_mutating_state() {
+        let mut c = controller();
+        let original_opts = c.config().nfqws2_opt.clone();
+
+        assert!(c.apply_profile(&profile("../evil", "--qnum=200")).is_err());
+
+        assert_eq!(c.current_profile(), None);
+        assert_eq!(c.config().nfqws2_opt, original_opts);
+    }
+
+    #[test]
+    fn apply_profile_rejects_forbidden_opts_without_mutating_state() {
+        let mut c = controller();
+
+        assert!(c.apply_profile(&profile("ok", "--rm --force")).is_err());
+
+        assert_eq!(c.current_profile(), None);
+    }
 }

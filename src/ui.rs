@@ -254,6 +254,10 @@ fn draw_settings_tab(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("Profiles loaded: ", Style::default().fg(Color::Gray)),
             Span::raw(app.profiles.len().to_string()),
         ]),
+        Line::from(vec![
+            Span::styled("nfqws2 opts: ", Style::default().fg(Color::Gray)),
+            Span::raw(app.nfqws_opts().to_string()),
+        ]),
     ])
     .block(Block::default().title(" Settings ").borders(Borders::ALL));
     f.render_widget(settings, area);

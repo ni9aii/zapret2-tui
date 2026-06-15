@@ -122,6 +122,30 @@ impl DaemonManager {
         }
     }
 
+    /// Parse an nfqws2 option string and validate every flag against the
+    /// whitelist. Returns the parsed arguments on success.
+    pub fn validate_opts(opts: &str) -> Result<Vec<String>> {
+        let args = shell_words::split(opts)
+            .map_err(|e| ZapretError::ConfigError(format!("failed to parse NFQWS2_OPT: {e}")))?;
+        for arg in &args {
+            if !Self::validate_arg(arg) {
+                return Err(ZapretError::ConfigError(format!(
+                    "forbidden argument in NFQWS2_OPT: {arg}"
+                )));
+            }
+        }
+        Ok(args)
+    }
+
+    /// Update configuration-derived settings (binary path, options, queue
+    /// number) from a new config, preserving the tracked child and the log
+    /// channel so a running daemon stays controllable.
+    pub fn apply_config(&mut self, config: &ZapretConfig) {
+        self.bin_path = config.nfqws2_bin();
+        self.opts = config.nfqws2_opt.clone();
+        self.qnum = config.qnum;
+    }
+
     pub async fn start(&mut self) -> Result<()> {
         if self.is_running() {
             warn!("nfqws2 is already running");
@@ -135,15 +159,7 @@ impl DaemonManager {
         let mut cmd = Command::new(&self.bin_path);
         cmd.arg(format!("--qnum={}", self.qnum));
 
-        for arg in shell_words::split(&self.opts)
-            .map_err(|e| ZapretError::ConfigError(format!("failed to parse NFQWS2_OPT: {}", e)))?
-        {
-            if !Self::validate_arg(&arg) {
-                return Err(ZapretError::ConfigError(format!(
-                    "forbidden argument in NFQWS2_OPT: {}",
-                    arg
-                )));
-            }
+        for arg in Self::validate_opts(&self.opts)? {
             cmd.arg(arg);
         }
 
