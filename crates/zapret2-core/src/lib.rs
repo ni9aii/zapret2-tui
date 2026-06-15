@@ -30,6 +30,7 @@ pub mod actions;
 pub mod config;
 pub mod daemon;
 pub mod firewall;
+pub mod privilege;
 pub mod profile;
 
 use std::path::PathBuf;
@@ -54,6 +55,11 @@ pub enum ZapretError {
     /// Error spawning or managing the nfqws2 process.
     #[error("process error: {0}")]
     ProcessError(String),
+    /// A privileged action was cancelled or not authorized at the polkit
+    /// prompt. Reported distinctly from an operational failure so the UI can
+    /// say "authentication cancelled" rather than "action failed".
+    #[error("authentication cancelled or not authorized")]
+    AuthCancelled,
 }
 
 /// Result type for zapret2 operations.
@@ -95,6 +101,8 @@ pub struct ZapretController {
     daemon: daemon::DaemonManager,
     firewall: firewall::FirewallManager,
     log_rx: Option<mpsc::UnboundedReceiver<String>>,
+    mode: privilege::ResolvedMode,
+    helper_path: PathBuf,
 }
 
 impl ZapretController {
@@ -113,7 +121,32 @@ impl ZapretController {
             daemon,
             firewall,
             log_rx: Some(log_rx),
+            mode: privilege::ResolvedMode::default(),
+            helper_path: PathBuf::from(privilege::DEFAULT_HELPER_PATH),
         })
+    }
+
+    /// Select the privilege strategy, resolving `Auto` against the current
+    /// environment (root → direct, otherwise pkexec). Defaults to direct.
+    pub fn set_privilege_mode(&mut self, mode: privilege::PrivilegeMode) {
+        self.mode = mode.resolve();
+        tracing::info!("privilege mode resolved to {:?}", self.mode);
+    }
+
+    /// The resolved privilege strategy in effect.
+    pub fn privilege_mode(&self) -> privilege::ResolvedMode {
+        self.mode
+    }
+
+    /// Override the path to the privileged helper (default
+    /// [`DEFAULT_HELPER_PATH`](privilege::DEFAULT_HELPER_PATH)).
+    pub fn set_helper_path(&mut self, path: PathBuf) {
+        self.helper_path = path;
+    }
+
+    /// Build a pkexec executor bound to the current config and helper path.
+    fn pkexec_executor(&self) -> privilege::PkexecExecutor {
+        privilege::PkexecExecutor::new(self.helper_path.clone(), self.config.config_path.clone())
     }
 
     /// Get the nfqws2 log receiver. Can only be called once.
@@ -140,19 +173,42 @@ impl ZapretController {
 
     /// Start the zapret2 daemon and apply firewall rules.
     ///
-    /// Requires root privileges for nftables operations.
+    /// In direct mode this runs in-process (requires root) and keeps the
+    /// tracked child so nfqws2 logs stream into the TUI. In pkexec mode the
+    /// work is delegated to `pkexec zapret2-helper`, triggering polkit.
     pub async fn start(&mut self) -> Result<()> {
-        tracing::info!("starting zapret2");
-        self.firewall.apply().await?;
-        self.daemon.start().await?;
+        use privilege::PrivilegedExecutor;
+        tracing::info!("starting zapret2 ({:?})", self.mode);
+        match self.mode {
+            privilege::ResolvedMode::Direct => {
+                self.firewall.apply().await?;
+                self.daemon.start().await?;
+            }
+            privilege::ResolvedMode::Pkexec => {
+                let ex = self.pkexec_executor();
+                ex.apply_firewall().await?;
+                ex.start_daemon(self.config.current_profile.as_deref())
+                    .await?;
+            }
+        }
         Ok(())
     }
 
     /// Stop the zapret2 daemon and remove firewall rules.
     pub async fn stop(&mut self) -> Result<()> {
-        tracing::info!("stopping zapret2");
-        self.daemon.stop().await?;
-        self.firewall.remove().await?;
+        use privilege::PrivilegedExecutor;
+        tracing::info!("stopping zapret2 ({:?})", self.mode);
+        match self.mode {
+            privilege::ResolvedMode::Direct => {
+                self.daemon.stop().await?;
+                self.firewall.remove().await?;
+            }
+            privilege::ResolvedMode::Pkexec => {
+                let ex = self.pkexec_executor();
+                ex.stop_daemon().await?;
+                ex.remove_firewall().await?;
+            }
+        }
         Ok(())
     }
 

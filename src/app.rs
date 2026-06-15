@@ -7,6 +7,7 @@ use anyhow::Result;
 use chrono::Local;
 use crossterm::event::KeyCode;
 use tokio::sync::mpsc;
+use zapret2_core::privilege::PrivilegeMode;
 use zapret2_core::profile::{Profile, ProfileManager};
 use zapret2_core::{Status, ZapretController, DEFAULT_ZAPRET_BASE};
 
@@ -70,8 +71,9 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(config_path: Option<PathBuf>) -> Result<Self> {
+    pub fn new(config_path: Option<PathBuf>, privilege_mode: PrivilegeMode) -> Result<Self> {
         let mut controller = ZapretController::new(config_path)?;
+        controller.set_privilege_mode(privilege_mode);
         let log_rx = controller.take_log_receiver().unwrap_or_else(|| {
             let (_tx, rx) = mpsc::unbounded_channel();
             rx
