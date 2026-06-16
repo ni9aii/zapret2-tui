@@ -1,1 +1,15 @@
+# Build artifacts
 target/
+
+# graphify / tooling output
+graphify-out/
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
