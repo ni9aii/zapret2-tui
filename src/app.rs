@@ -9,7 +9,7 @@ use crossterm::event::KeyCode;
 use tokio::sync::mpsc;
 use zapret2_core::privilege::PrivilegeMode;
 use zapret2_core::profile::{Profile, ProfileManager};
-use zapret2_core::{Status, ZapretController, DEFAULT_ZAPRET_BASE};
+use zapret2_core::{Status, ZapretController, ZapretError, DEFAULT_ZAPRET_BASE};
 
 use crate::modal::{Modal, ProfileForm};
 
@@ -306,8 +306,13 @@ impl App {
                     self.status_message = "Running.".to_string();
                 }
                 Err(e) => {
-                    self.add_log(&format!("Start failed: {e}"));
-                    self.status_message = format!("Start failed: {e}");
+                    let msg = if matches!(e, ZapretError::AuthCancelled) {
+                        "Authentication cancelled.".to_string()
+                    } else {
+                        format!("Start failed: {e}")
+                    };
+                    self.add_log(&msg);
+                    self.status_message = msg;
                 }
             }
         }
@@ -325,8 +330,13 @@ impl App {
                 self.status_message = "Restarted.".to_string();
             }
             Err(e) => {
-                self.add_log(&format!("Restart failed: {e}"));
-                self.status_message = format!("Restart failed: {e}");
+                let msg = if matches!(e, ZapretError::AuthCancelled) {
+                    "Authentication cancelled.".to_string()
+                } else {
+                    format!("Restart failed: {e}")
+                };
+                self.add_log(&msg);
+                self.status_message = msg;
             }
         }
         self.update_status().await;
@@ -369,8 +379,8 @@ impl App {
     pub fn add_log(&mut self, msg: &str) {
         let timestamp = Local::now().format("%H:%M:%S");
         self.logs.push_back(format!("[{timestamp}] {msg}"));
-        while self.logs.len() > 1000 {
-            self.logs.pop_front();
+        if self.logs.len() > 1000 {
+            self.logs.drain(..self.logs.len() - 1000);
         }
     }
 
