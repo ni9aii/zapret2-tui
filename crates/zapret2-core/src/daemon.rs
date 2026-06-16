@@ -88,6 +88,8 @@ impl DaemonManager {
         if pid <= 0 {
             return false;
         }
+        // SAFETY: pid > 0 is guaranteed by the guard above; signal 0 never
+        // delivers, so no process is affected regardless of the result.
         if unsafe { libc::kill(pid, 0) } == 0 {
             return true;
         }
@@ -200,9 +202,11 @@ impl DaemonManager {
             });
         }
 
-        // Write pid file for later tracking
+        // Write pid file; propagate failure so start() callers know when
+        // status tracking will be broken (e.g. non-root can't write /var/run).
         if let Some(pid) = child.id() {
-            let _ = std::fs::write(&self.pid_file, pid.to_string());
+            std::fs::write(&self.pid_file, pid.to_string())
+                .map_err(|e| ZapretError::ProcessError(format!("failed to write pid file: {e}")))?;
         }
 
         self.child = Some(child);
@@ -235,8 +239,11 @@ impl DaemonManager {
         for arg in Self::validate_opts(&self.opts)? {
             cmd.arg(arg);
         }
-        // Inherit stdio; do NOT kill_on_drop — the daemon must outlive us.
-        cmd.stdin(Stdio::null());
+        // Redirect all stdio to /dev/null: the daemon is detached and its
+        // output would otherwise go to pkexec's socket, risking SIGPIPE.
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
 
         let child = cmd
             .spawn()

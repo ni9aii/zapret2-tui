@@ -76,6 +76,7 @@ impl PrivilegeMode {
 /// Whether the process is running as root (euid 0).
 #[cfg(unix)]
 pub fn is_root() -> bool {
+    // SAFETY: geteuid() is always safe to call — no pointer args, no UB conditions.
     unsafe { libc::geteuid() == 0 }
 }
 
