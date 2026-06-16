@@ -16,25 +16,6 @@ use crate::{config::ZapretConfig, Result, ZapretError};
 /// Uses /var/run for proper permissions on Linux systems.
 pub const NFQWS2_PID_FILE: &str = "/var/run/nfqws2.pid";
 
-/// Whitelist of allowed nfqws2 arguments for security hardening
-const ALLOWED_NFQWS_OPTS: &[&str] = &[
-    "--qnum",
-    "--desync",
-    "--hostlist",
-    "--split",
-    "--wss",
-    "--dpi-desync",
-    "--dpi-desync-fw-external",
-    "--dpi-desync-ttl",
-    "--encrypt",
-    "--md5",
-    "--server",
-    "--port",
-    "--proxy",
-    "--proxy-host",
-    "--proxy-port",
-];
-
 pub struct DaemonManager {
     bin_path: PathBuf,
     opts: String,
@@ -112,33 +93,6 @@ impl DaemonManager {
         self.read_pid_file().is_some_and(Self::pid_is_alive)
     }
 
-    /// Validates that an argument is in the whitelist (prevents command injection)
-    fn validate_arg(arg: &str) -> bool {
-        if arg.starts_with('-') {
-            // It's a flag - check if it matches whitelist
-            let flag = arg.split('=').next().unwrap_or(arg);
-            ALLOWED_NFQWS_OPTS.contains(&flag)
-        } else {
-            // Non-flag arguments (values) are allowed
-            true
-        }
-    }
-
-    /// Parse an nfqws2 option string and validate every flag against the
-    /// whitelist. Returns the parsed arguments on success.
-    pub fn validate_opts(opts: &str) -> Result<Vec<String>> {
-        let args = shell_words::split(opts)
-            .map_err(|e| ZapretError::ConfigError(format!("failed to parse NFQWS2_OPT: {e}")))?;
-        for arg in &args {
-            if !Self::validate_arg(arg) {
-                return Err(ZapretError::ConfigError(format!(
-                    "forbidden argument in NFQWS2_OPT: {arg}"
-                )));
-            }
-        }
-        Ok(args)
-    }
-
     /// Update configuration-derived settings (binary path, options, queue
     /// number) from a new config, preserving the tracked child and the log
     /// channel so a running daemon stays controllable.
@@ -161,7 +115,7 @@ impl DaemonManager {
         let mut cmd = Command::new(&self.bin_path);
         cmd.arg(format!("--qnum={}", self.qnum));
 
-        for arg in Self::validate_opts(&self.opts)? {
+        for arg in crate::validation::validate_opts(&self.opts)? {
             cmd.arg(arg);
         }
 
@@ -236,7 +190,7 @@ impl DaemonManager {
 
         let mut cmd = Command::new(&self.bin_path);
         cmd.arg(format!("--qnum={}", self.qnum));
-        for arg in Self::validate_opts(&self.opts)? {
+        for arg in crate::validation::validate_opts(&self.opts)? {
             cmd.arg(arg);
         }
         // Redirect all stdio to /dev/null: the daemon is detached and its

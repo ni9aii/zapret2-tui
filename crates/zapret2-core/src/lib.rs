@@ -32,6 +32,7 @@ pub mod daemon;
 pub mod firewall;
 pub mod privilege;
 pub mod profile;
+pub mod validation;
 
 use std::path::PathBuf;
 use thiserror::Error;
@@ -230,7 +231,7 @@ impl ZapretController {
     pub fn apply_profile(&mut self, profile: &profile::Profile) -> Result<()> {
         // Validate everything before mutating any state.
         profile::ProfileManager::validate_name(&profile.name)?;
-        daemon::DaemonManager::validate_opts(&profile.nfqws_opts)?;
+        validation::validate_opts(&profile.nfqws_opts)?;
 
         self.config.nfqws2_opt = profile.nfqws_opts.clone();
         self.config.current_profile = Some(profile.name.clone());

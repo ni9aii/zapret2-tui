@@ -74,8 +74,6 @@ impl FirewallManager {
     async fn apply_nftables(&self) -> Result<()> {
         info!("applying nftables rules");
 
-        let _ = self.remove_nftables().await;
-
         let script = format!(
             r#"
 table inet {table}

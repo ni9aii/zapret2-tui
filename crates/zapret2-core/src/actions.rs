@@ -62,7 +62,7 @@ fn profiles_dir(config: &ZapretConfig) -> std::path::PathBuf {
 /// profile.
 pub fn profile_save(config: &ZapretConfig, profile: &crate::profile::Profile) -> Result<()> {
     crate::profile::ProfileManager::validate_name(&profile.name)?;
-    DaemonManager::validate_opts(&profile.nfqws_opts)?;
+    crate::validation::validate_opts(&profile.nfqws_opts)?;
     let mut manager = crate::profile::ProfileManager::new(profiles_dir(config));
     manager.save_profile(profile)
 }

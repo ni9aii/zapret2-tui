@@ -3,8 +3,8 @@
 //! Pure state and validation logic — no rendering — so it is unit-testable.
 //! Rendering lives in [`crate::ui`]; key handling in [`crate::app`].
 
-use zapret2_core::daemon::DaemonManager;
 use zapret2_core::profile::{Profile, ProfileManager};
+use zapret2_core::validation;
 
 /// Number of editable fields in the profile form.
 pub const FIELD_COUNT: usize = 5;
@@ -163,7 +163,7 @@ impl ProfileForm {
     pub fn validate(&self) -> Result<Profile, String> {
         let profile = self.to_profile();
         ProfileManager::validate_name(&profile.name).map_err(|e| e.to_string())?;
-        DaemonManager::validate_opts(&profile.nfqws_opts).map_err(|e| e.to_string())?;
+        validation::validate_opts(&profile.nfqws_opts).map_err(|e| e.to_string())?;
         Ok(profile)
     }
 }
