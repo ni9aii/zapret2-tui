@@ -77,6 +77,15 @@ async fn main() -> Result<()> {
         Err(e) => eprintln!("zapret2-tui: file logging disabled ({e})"),
     }
 
+    // Restore the terminal if a panic unwinds past the normal cleanup path so
+    // the shell is left in a usable state instead of stuck in raw/alternate mode.
+    let default_panic = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = disable_raw_mode();
+        let _ = stdout().execute(LeaveAlternateScreen);
+        default_panic(info);
+    }));
+
     stdout().execute(EnterAlternateScreen)?;
     enable_raw_mode()?;
 
