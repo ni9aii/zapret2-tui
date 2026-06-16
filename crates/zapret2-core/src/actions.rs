@@ -49,3 +49,26 @@ pub async fn daemon_stop(config: &ZapretConfig) -> Result<()> {
 pub fn daemon_status(config: &ZapretConfig) -> bool {
     DaemonManager::new(config).is_running()
 }
+
+/// The profiles directory for a config (`<ZAPRET_BASE>/profiles`).
+fn profiles_dir(config: &ZapretConfig) -> std::path::PathBuf {
+    config.zapret_base.join("profiles")
+}
+
+/// Validate and write a profile to disk under the config's profiles directory.
+///
+/// Validates both the profile name (path-safety) and the nfqws2 options
+/// (whitelist) before writing, so a privileged caller never persists an unsafe
+/// profile.
+pub fn profile_save(config: &ZapretConfig, profile: &crate::profile::Profile) -> Result<()> {
+    crate::profile::ProfileManager::validate_name(&profile.name)?;
+    DaemonManager::validate_opts(&profile.nfqws_opts)?;
+    let mut manager = crate::profile::ProfileManager::new(profiles_dir(config));
+    manager.save_profile(profile)
+}
+
+/// Remove a named profile from disk under the config's profiles directory.
+pub fn profile_remove(config: &ZapretConfig, name: &str) -> Result<()> {
+    let mut manager = crate::profile::ProfileManager::new(profiles_dir(config));
+    manager.remove(name)
+}

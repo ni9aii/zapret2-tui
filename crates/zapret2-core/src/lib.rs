@@ -247,6 +247,33 @@ impl ZapretController {
     pub fn current_profile(&self) -> Option<&str> {
         self.config.current_profile.as_deref()
     }
+
+    /// Persist a profile to disk, going through the privilege executor.
+    ///
+    /// In direct mode the write runs in-process. In pkexec mode it delegates to
+    /// `pkexec zapret2-helper profile save …`, triggering polkit.
+    pub async fn save_profile(&self, profile: &profile::Profile) -> Result<()> {
+        use privilege::PrivilegedExecutor;
+        match self.mode {
+            privilege::ResolvedMode::Direct => actions::profile_save(&self.config, profile),
+            privilege::ResolvedMode::Pkexec => {
+                let ex = self.pkexec_executor();
+                ex.save_profile(profile).await
+            }
+        }
+    }
+
+    /// Remove a profile from disk, going through the privilege executor.
+    pub async fn remove_profile(&self, name: &str) -> Result<()> {
+        use privilege::PrivilegedExecutor;
+        match self.mode {
+            privilege::ResolvedMode::Direct => actions::profile_remove(&self.config, name),
+            privilege::ResolvedMode::Pkexec => {
+                let ex = self.pkexec_executor();
+                ex.remove_profile(name).await
+            }
+        }
+    }
 }
 
 /// Current status of zapret2 components.

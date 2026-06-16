@@ -127,7 +127,7 @@ impl App {
 
         // A modal captures all input until dismissed.
         if self.modal.is_open() {
-            self.handle_modal_key(key);
+            self.handle_modal_key(key).await;
             return Ok(false);
         }
 
@@ -167,11 +167,11 @@ impl App {
     }
 
     /// Handle a key while a modal is open.
-    fn handle_modal_key(&mut self, key: KeyCode) {
+    async fn handle_modal_key(&mut self, key: KeyCode) {
         match &mut self.modal {
             Modal::Form(form) => match key {
                 KeyCode::Esc => self.modal = Modal::None,
-                KeyCode::Enter => self.submit_form(),
+                KeyCode::Enter => self.submit_form().await,
                 KeyCode::Tab | KeyCode::Down => form.focus_next(),
                 KeyCode::BackTab | KeyCode::Up => form.focus_prev(),
                 KeyCode::Backspace => form.backspace(),
@@ -179,7 +179,9 @@ impl App {
                 _ => {}
             },
             Modal::DeleteConfirm { .. } => match key {
-                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => self.confirm_delete(),
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                    self.confirm_delete().await
+                }
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => self.modal = Modal::None,
                 _ => {}
             },
@@ -190,7 +192,7 @@ impl App {
     /// Validate and persist the open profile form. On validation failure the
     /// form stays open with an error; nothing is written. On a write failure
     /// (e.g. no permission for /opt/zapret2/profiles) the form also stays open.
-    fn submit_form(&mut self) {
+    async fn submit_form(&mut self) {
         let Modal::Form(form) = &self.modal else {
             return;
         };
@@ -207,7 +209,7 @@ impl App {
             }
         };
 
-        if let Err(e) = self.profile_manager.save_profile(&profile) {
+        if let Err(e) = self.controller.save_profile(&profile).await {
             if let Modal::Form(form) = &mut self.modal {
                 form.error = Some(format!("save failed: {e}"));
             }
@@ -216,7 +218,7 @@ impl App {
         // A rename (edit where the name changed) removes the old file.
         let is_edit = form.editing.is_some();
         if let Some(old) = form.editing.filter(|old| *old != profile.name) {
-            if let Err(e) = self.profile_manager.remove(&old) {
+            if let Err(e) = self.controller.remove_profile(&old).await {
                 self.add_log(&format!(
                     "renamed profile but failed to remove '{old}': {e}"
                 ));
@@ -226,18 +228,19 @@ impl App {
         let verb = if is_edit { "updated" } else { "created" };
         self.status_message = format!("Profile '{}' {verb}.", profile.name);
         self.modal = Modal::None;
+        self.reload_profiles();
         self.refresh_profiles(Some(&profile.name));
         let msg = self.status_message.clone();
         self.add_log(&msg);
     }
 
     /// Delete the profile named by the open delete-confirm modal.
-    fn confirm_delete(&mut self) {
+    async fn confirm_delete(&mut self) {
         let Modal::DeleteConfirm { name } = &self.modal else {
             return;
         };
         let name = name.clone();
-        match self.profile_manager.remove(&name) {
+        match self.controller.remove_profile(&name).await {
             Ok(()) => {
                 self.status_message = format!("Profile '{name}' deleted.");
                 if self.active_profile.as_deref() == Some(name.as_str()) {
@@ -250,9 +253,17 @@ impl App {
             }
         }
         self.modal = Modal::None;
+        self.reload_profiles();
         self.refresh_profiles(None);
         let msg = self.status_message.clone();
         self.add_log(&msg);
+    }
+
+    /// Re-read the profiles directory into the in-memory manager.
+    fn reload_profiles(&mut self) {
+        if let Err(e) = self.profile_manager.load() {
+            tracing::warn!("failed to reload profiles: {e}");
+        }
     }
 
     /// Rebuild the cached profile list from the manager, keeping the selection

@@ -43,6 +43,11 @@ enum Command {
         #[command(subcommand)]
         action: DaemonAction,
     },
+    /// Manage profiles on disk.
+    Profile {
+        #[command(subcommand)]
+        action: ProfileAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -65,6 +70,35 @@ enum DaemonAction {
     Stop,
     /// Report whether the nfqws2 daemon is running (exit 0 = running).
     Status,
+}
+
+#[derive(Subcommand)]
+enum ProfileAction {
+    /// Validate and write a profile to disk.
+    Save {
+        #[arg(long, value_name = "NAME")]
+        name: String,
+        #[arg(long, default_value = "")]
+        description: String,
+        #[arg(long, default_value = "")]
+        strategy: String,
+        /// nfqws2 options (validated against the whitelist).
+        #[arg(
+            long,
+            value_name = "OPTS",
+            default_value = "",
+            allow_hyphen_values = true
+        )]
+        nfqws_opts: String,
+        /// Comma- or space-separated hostlist file names.
+        #[arg(long, value_name = "LIST", default_value = "")]
+        hostlists: String,
+    },
+    /// Remove a profile from disk.
+    Remove {
+        #[arg(long, value_name = "NAME")]
+        name: String,
+    },
 }
 
 #[tokio::main]
@@ -119,7 +153,39 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 }
             }
         },
+        Command::Profile { action } => match action {
+            ProfileAction::Save {
+                name,
+                description,
+                strategy,
+                nfqws_opts,
+                hostlists,
+            } => {
+                let profile = zapret2_core::profile::Profile {
+                    name,
+                    description,
+                    strategy,
+                    hostlists: parse_hostlists(&hostlists),
+                    nfqws_opts,
+                };
+                actions::profile_save(&config, &profile)?;
+                Ok(ExitCode::SUCCESS)
+            }
+            ProfileAction::Remove { name } => {
+                actions::profile_remove(&config, &name)?;
+                Ok(ExitCode::SUCCESS)
+            }
+        },
     }
+}
+
+/// Split a comma/whitespace-separated hostlists string into a clean list.
+fn parse_hostlists(raw: &str) -> Vec<String> {
+    raw.split([',', ' ', '\t', '\n'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// Load the named profile and patch the config's nfqws2 options with it.
@@ -161,6 +227,57 @@ mod tests {
         assert!(parse(&["zapret2-helper", "bogus"]).is_err());
         assert!(parse(&["zapret2-helper", "firewall", "nuke"]).is_err());
         assert!(parse(&["zapret2-helper", "daemon", "explode"]).is_err());
+        assert!(parse(&["zapret2-helper", "profile", "wipe"]).is_err());
+    }
+
+    #[test]
+    fn profile_save_requires_name_and_accepts_fields() {
+        // Missing --name is an error.
+        assert!(parse(&["zapret2-helper", "profile", "save"]).is_err());
+
+        let cli = parse(&[
+            "zapret2-helper",
+            "profile",
+            "save",
+            "--name",
+            "yt",
+            "--nfqws-opts",
+            "--qnum=200",
+            "--hostlists",
+            "a.txt, b.txt",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Profile {
+                action:
+                    ProfileAction::Save {
+                        name,
+                        nfqws_opts,
+                        hostlists,
+                        ..
+                    },
+            } => {
+                assert_eq!(name, "yt");
+                assert_eq!(nfqws_opts, "--qnum=200");
+                assert_eq!(hostlists, "a.txt, b.txt");
+            }
+            _ => panic!("expected profile save"),
+        }
+    }
+
+    #[test]
+    fn profile_remove_requires_name() {
+        assert!(parse(&["zapret2-helper", "profile", "remove"]).is_err());
+        assert!(parse(&["zapret2-helper", "profile", "remove", "--name", "yt"]).is_ok());
+    }
+
+    #[test]
+    fn parse_hostlists_splits_and_trims() {
+        assert_eq!(
+            parse_hostlists("  a.txt , b.txt   c.txt,,"),
+            vec!["a.txt", "b.txt", "c.txt"]
+        );
+        assert!(parse_hostlists("").is_empty());
     }
 
     #[test]

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Result, ZapretError};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Profile {
     pub name: String,
     pub description: String,

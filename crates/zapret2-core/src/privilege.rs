@@ -97,6 +97,8 @@ pub trait PrivilegedExecutor {
     async fn remove_firewall(&self) -> Result<()>;
     async fn start_daemon(&self, profile: Option<&str>) -> Result<()>;
     async fn stop_daemon(&self) -> Result<()>;
+    async fn save_profile(&self, profile: &crate::profile::Profile) -> Result<()>;
+    async fn remove_profile(&self, name: &str) -> Result<()>;
 }
 
 /// In-process executor: performs operations directly (no pkexec). Correct when
@@ -143,6 +145,14 @@ impl PrivilegedExecutor for DirectExecutor {
 
     async fn stop_daemon(&self) -> Result<()> {
         actions::daemon_stop(&self.config).await
+    }
+
+    async fn save_profile(&self, profile: &crate::profile::Profile) -> Result<()> {
+        actions::profile_save(&self.config, profile)
+    }
+
+    async fn remove_profile(&self, name: &str) -> Result<()> {
+        actions::profile_remove(&self.config, name)
     }
 }
 
@@ -227,6 +237,29 @@ impl PrivilegedExecutor for PkexecExecutor {
     async fn stop_daemon(&self) -> Result<()> {
         self.run(&["daemon", "stop"]).await
     }
+
+    async fn save_profile(&self, profile: &crate::profile::Profile) -> Result<()> {
+        let hostlists = profile.hostlists.join(",");
+        self.run(&[
+            "profile",
+            "save",
+            "--name",
+            &profile.name,
+            "--description",
+            &profile.description,
+            "--strategy",
+            &profile.strategy,
+            "--nfqws-opts",
+            &profile.nfqws_opts,
+            "--hostlists",
+            &hostlists,
+        ])
+        .await
+    }
+
+    async fn remove_profile(&self, name: &str) -> Result<()> {
+        self.run(&["profile", "remove", "--name", name]).await
+    }
 }
 
 /// One recorded call against a [`MockExecutor`].
@@ -236,6 +269,8 @@ pub enum MockCall {
     RemoveFirewall,
     StartDaemon(Option<String>),
     StopDaemon,
+    SaveProfile(crate::profile::Profile),
+    RemoveProfile(String),
 }
 
 /// Test double recording calls; performs no real work.
@@ -277,6 +312,16 @@ impl PrivilegedExecutor for MockExecutor {
 
     async fn stop_daemon(&self) -> Result<()> {
         self.record(MockCall::StopDaemon);
+        Ok(())
+    }
+
+    async fn save_profile(&self, profile: &crate::profile::Profile) -> Result<()> {
+        self.record(MockCall::SaveProfile(profile.clone()));
+        Ok(())
+    }
+
+    async fn remove_profile(&self, name: &str) -> Result<()> {
+        self.record(MockCall::RemoveProfile(name.to_string()));
         Ok(())
     }
 }
