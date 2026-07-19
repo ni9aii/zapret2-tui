@@ -165,6 +165,9 @@ jobs:
         with:
           components: rustfmt
 
+      - name: Ensure a default toolchain is set
+        run: rustup default stable
+
       - name: Build nfqws2 from upstream
         run: |
           git clone --depth 1 https://github.com/bol-van/zapret2.git /opt/zapret2
@@ -174,7 +177,8 @@ jobs:
 
       - name: Run integration tests (root, direct mode)
         run: |
-          sudo env "PATH=$PATH" "ZAPRET_BASE=/opt/zapret2" \
+          sudo -E env "PATH=$PATH" "CARGO_HOME=$CARGO_HOME" "RUSTUP_HOME=$RUSTUP_HOME" \
+            "ZAPRET_BASE=/opt/zapret2" \
             cargo test --locked --features integration \
               --package zapret2-core --test integration_zapret -- --nocapture
 
