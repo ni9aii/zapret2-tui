@@ -115,6 +115,7 @@ Set `RUST_LOG` to change verbosity (default `info`).
 
 ### Documentation
 
+- [`CHANGELOG.md`](CHANGELOG.md) — release history
 - [`docs/architecture.md`](docs/architecture.md) — crates and data flow
 - [`docs/privilege-model.md`](docs/privilege-model.md) — pkexec/polkit, modes
 - [`docs/profile-management.md`](docs/profile-management.md) — profiles & CRUD
@@ -289,6 +290,7 @@ DESYNC_MARK=0x40000000
 
 ### Документация
 
+- [`CHANGELOG.md`](CHANGELOG.md) — история релизов
 - [`docs/architecture.md`](docs/architecture.md) — крейты и поток данных
 - [`docs/privilege-model.md`](docs/privilege-model.md) — pkexec/polkit, режимы
 - [`docs/profile-management.md`](docs/profile-management.md) — профили и CRUD
