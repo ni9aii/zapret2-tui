@@ -11,6 +11,12 @@ Initial public release.
 
 ### Added
 - Terminal UI (ratatui) for managing zapret2 / `nfqws2` on Linux.
+- Multi-platform CI matrix: distros (ubuntu, debian, fedora, alpine/musl)
+  × toolchains (stable, beta, nightly, MSRV 1.88) × architectures (x86_64 and
+  aarch64 on native arm runners), see `.github/workflows/ci.yml`.
+- `integration` feature gating real-zapret2 end-to-end tests
+  (`cargo test --features integration` drives a built `nfqws2` + nftables in
+  direct mode; requires root).
 - Real-time daemon and firewall status monitoring.
 - One-key control: start/stop (`s`), restart (`r`), quit (`q`).
 - Multi-tab interface: Status, Profiles, Logs, Settings.

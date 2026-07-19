@@ -151,6 +151,19 @@ cargo fmt -- --check
 cargo clippy --all-targets --workspace -- -D warnings
 ```
 
+#### Интеграционные тесты (реальный zapret2)
+
+Фича `integration` включает сквозные тесты, которые управляют *реальным*
+zapret2: применяют правила nftables, запускают `nfqws2` и затем всё убирают.
+Требуют root и собранного `nfqws2` в `$ZAPRET_BASE/nfq2/nfqws2`
+(upstream: `cd $ZAPRET_BASE/nfq2 && make`). CI-джоб `integration` собирает
+zapret2 из исходников и запускает их на привилегированном раннере. Локально:
+
+```bash
+sudo env ZAPRET_BASE=/opt/zapret2 cargo test --features integration \
+    --package zapret2-core --test integration_zapret
+```
+
 ### Лицензия
 
 Двойное лицензирование: MIT ИЛИ Apache-2.0.

@@ -19,6 +19,12 @@ shell-words = "1.1.1"
 libc = "0.2.186"
 nix = { workspace = true, features = ["process", "signal"] }
 
+[features]
+# Integration tests that drive a real zapret2 install (nfqws2 + nftables).
+# Enable with `--features integration`. Requires root and a built nfqws2 at
+# $ZAPRET_BASE/nfq2/nfqws2 (see .github/workflows/ci.yml `integration` job).
+integration = []
+
 [dev-dependencies]
 tokio-test = "0.4"
 tempfile = "3"
