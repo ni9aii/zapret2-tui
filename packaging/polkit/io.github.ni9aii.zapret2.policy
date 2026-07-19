@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+
+<!--
+  polkit policy for zapret2-tui (DRAFT).
+
+  zapret2-tui runs as a normal user and performs root-only operations
+  (firewall rules, nfqws2 daemon) by invoking the small `zapret2-helper`
+  binary through pkexec. pkexec authorizes that invocation against the
+  `org.freedesktop.policykit.exec.path` annotation below, so an admin
+  authentication prompt appears before the helper runs.
+
+  Install to: /usr/share/polkit-1/actions/io.github.ni9aii.zapret2.policy
+  Install the helper at the annotated path: /usr/libexec/zapret2-helper
+
+  The three semantic actions (manage-firewall, manage-daemon,
+  modify-profiles) are reserved for a future fine-grained model where the
+  helper checks them via the polkit API per subcommand. Today, a single
+  pkexec exec action gates the whole helper.
+-->
+<policyconfig>
+
+  <vendor>zapret2-tui</vendor>
+  <vendor_url>https://github.com/ni9aii/zapret2-tui</vendor_url>
+
+  <!-- Operative action: authorizes `pkexec /usr/libexec/zapret2-helper`. -->
+  <action id="io.github.ni9aii.zapret2.run-helper">
+    <description>Run the zapret2 privileged helper</description>
+    <message>Authentication is required to manage zapret2 (firewall and DPI bypass daemon)</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/zapret2-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+
+  <!-- Reserved semantic actions for a future per-subcommand policy. -->
+  <action id="io.github.ni9aii.zapret2.manage-firewall">
+    <description>Apply or remove zapret2 firewall rules</description>
+    <message>Authentication is required to change zapret2 firewall rules</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="io.github.ni9aii.zapret2.manage-daemon">
+    <description>Start or stop the zapret2 (nfqws2) daemon</description>
+    <message>Authentication is required to control the zapret2 daemon</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="io.github.ni9aii.zapret2.modify-profiles">
+    <description>Modify zapret2 profiles</description>
+    <message>Authentication is required to modify zapret2 profiles</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+</policyconfig>

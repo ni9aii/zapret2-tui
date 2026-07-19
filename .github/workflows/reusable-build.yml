@@ -1,0 +1,76 @@
+name: Reusable build matrix step
+
+on:
+  workflow_call:
+    inputs:
+      distro:
+        required: true
+        type: string
+      emoji:
+        required: true
+        type: string
+      runner:
+        required: true
+        type: string
+      container:
+        required: false
+        type: string
+        default: ""
+      arch:
+        required: true
+        type: string
+      toolchain:
+        required: true
+        type: string
+      experimental:
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    name: build ${{ inputs.emoji }} ${{ inputs.distro }} / ${{ inputs.toolchain }} / ${{ inputs.arch }}
+    runs-on: ${{ inputs.runner }}
+    continue-on-error: ${{ inputs.experimental }}
+    container: ${{ inputs.container != '' && fromJSON(inputs.container) || '' }}
+    steps:
+      - name: Install base tools (alpine)
+        if: inputs.distro == 'alpine'
+        run: apk add --no-cache bash curl git build-base
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ inputs.toolchain }}
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ inputs.runner }}-${{ inputs.distro }}-${{ inputs.toolchain }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ inputs.runner }}-${{ inputs.distro }}-${{ inputs.toolchain }}-
+
+      - name: Format check
+        run: cargo fmt -- --check
+
+      - name: Clippy
+        # MSRV toolchain keeps clippy lenient (no -D warnings) to avoid
+        # newer-linter churn on the oldest supported compiler.
+        if: inputs.toolchain != '1.88'
+        run: cargo clippy --locked --all-targets --workspace -- -D warnings
+
+      - name: Test
+        run: cargo test --locked --workspace
+
+      - name: MSRV check
+        if: inputs.toolchain == '1.88'
+        run: cargo check --locked --workspace

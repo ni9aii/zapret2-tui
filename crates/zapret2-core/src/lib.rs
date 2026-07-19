@@ -26,13 +26,17 @@
 //! # }
 //! ```
 
+pub mod actions;
 pub mod config;
 pub mod daemon;
 pub mod firewall;
+pub mod privilege;
 pub mod profile;
+pub mod validation;
 
 use std::path::PathBuf;
 use thiserror::Error;
+use tokio::sync::mpsc;
 
 /// Errors that can occur when managing zapret2.
 #[derive(Error, Debug)]
@@ -52,6 +56,11 @@ pub enum ZapretError {
     /// Error spawning or managing the nfqws2 process.
     #[error("process error: {0}")]
     ProcessError(String),
+    /// A privileged action was cancelled or not authorized at the polkit
+    /// prompt. Reported distinctly from an operational failure so the UI can
+    /// say "authentication cancelled" rather than "action failed".
+    #[error("authentication cancelled or not authorized")]
+    AuthCancelled,
 }
 
 /// Result type for zapret2 operations.
@@ -92,6 +101,9 @@ pub struct ZapretController {
     config: config::ZapretConfig,
     daemon: daemon::DaemonManager,
     firewall: firewall::FirewallManager,
+    log_rx: Option<mpsc::UnboundedReceiver<String>>,
+    mode: privilege::ResolvedMode,
+    helper_path: PathBuf,
 }
 
 impl ZapretController {
@@ -100,14 +112,55 @@ impl ZapretController {
     /// If `config_path` is `None`, uses `DEFAULT_CONFIG_PATH`.
     pub fn new(config_path: Option<PathBuf>) -> Result<Self> {
         let config = config::ZapretConfig::load(config_path)?;
-        let daemon = daemon::DaemonManager::new(&config);
+        let (log_tx, log_rx) = mpsc::unbounded_channel();
+        let mut daemon = daemon::DaemonManager::new(&config);
+        daemon.set_log_channel(log_tx);
         let firewall = firewall::FirewallManager::new(&config);
 
         Ok(Self {
             config,
             daemon,
             firewall,
+            log_rx: Some(log_rx),
+            mode: privilege::ResolvedMode::default(),
+            helper_path: PathBuf::from(privilege::DEFAULT_HELPER_PATH),
         })
+    }
+
+    /// Select the privilege strategy, resolving `Auto` against the current
+    /// environment (root → direct, otherwise pkexec). Defaults to direct.
+    pub fn set_privilege_mode(&mut self, mode: privilege::PrivilegeMode) {
+        self.mode = mode.resolve();
+        tracing::info!("privilege mode resolved to {:?}", self.mode);
+    }
+
+    /// The resolved privilege strategy in effect.
+    pub fn privilege_mode(&self) -> privilege::ResolvedMode {
+        self.mode
+    }
+
+    /// Override the path to the privileged helper (default
+    /// [`DEFAULT_HELPER_PATH`](privilege::DEFAULT_HELPER_PATH)).
+    pub fn set_helper_path(&mut self, path: PathBuf) {
+        self.helper_path = path;
+    }
+
+    /// Build a pkexec executor bound to the current config and helper path.
+    fn pkexec_executor(&self) -> privilege::PkexecExecutor {
+        privilege::PkexecExecutor::new(self.helper_path.clone(), self.config.config_path.clone())
+    }
+
+    /// Get the nfqws2 log receiver. Can only be called once.
+    pub fn take_log_receiver(&mut self) -> Option<mpsc::UnboundedReceiver<String>> {
+        self.log_rx.take()
+    }
+
+    pub fn config(&self) -> &config::ZapretConfig {
+        &self.config
+    }
+
+    pub fn daemon_pid(&self) -> Option<u32> {
+        self.daemon.pid()
     }
 
     /// Returns current status of daemon and firewall.
@@ -121,19 +174,42 @@ impl ZapretController {
 
     /// Start the zapret2 daemon and apply firewall rules.
     ///
-    /// Requires root privileges for nftables operations.
+    /// In direct mode this runs in-process (requires root) and keeps the
+    /// tracked child so nfqws2 logs stream into the TUI. In pkexec mode the
+    /// work is delegated to `pkexec zapret2-helper`, triggering polkit.
     pub async fn start(&mut self) -> Result<()> {
-        tracing::info!("starting zapret2");
-        self.firewall.apply().await?;
-        self.daemon.start().await?;
+        use privilege::PrivilegedExecutor;
+        tracing::info!("starting zapret2 ({:?})", self.mode);
+        match self.mode {
+            privilege::ResolvedMode::Direct => {
+                self.firewall.apply().await?;
+                self.daemon.start().await?;
+            }
+            privilege::ResolvedMode::Pkexec => {
+                let ex = self.pkexec_executor();
+                ex.apply_firewall().await?;
+                ex.start_daemon(self.config.current_profile.as_deref())
+                    .await?;
+            }
+        }
         Ok(())
     }
 
     /// Stop the zapret2 daemon and remove firewall rules.
     pub async fn stop(&mut self) -> Result<()> {
-        tracing::info!("stopping zapret2");
-        self.daemon.stop().await?;
-        self.firewall.remove().await?;
+        use privilege::PrivilegedExecutor;
+        tracing::info!("stopping zapret2 ({:?})", self.mode);
+        match self.mode {
+            privilege::ResolvedMode::Direct => {
+                self.daemon.stop().await?;
+                self.firewall.remove().await?;
+            }
+            privilege::ResolvedMode::Pkexec => {
+                let ex = self.pkexec_executor();
+                ex.stop_daemon().await?;
+                ex.remove_firewall().await?;
+            }
+        }
         Ok(())
     }
 
@@ -141,6 +217,63 @@ impl ZapretController {
     pub async fn restart(&mut self) -> Result<()> {
         self.stop().await?;
         self.start().await
+    }
+
+    /// Apply a profile to the runtime configuration.
+    ///
+    /// Validates the profile, patches the in-memory config (nfqws2 options and
+    /// active profile name) and rebuilds the daemon/firewall managers so the
+    /// next start/restart uses the selected profile. Does not write to
+    /// `/opt/zapret2/config` and does not require root.
+    ///
+    /// On error the configuration is left unchanged, so a failed apply never
+    /// silently mutates runtime state.
+    pub fn apply_profile(&mut self, profile: &profile::Profile) -> Result<()> {
+        // Validate everything before mutating any state.
+        profile::ProfileManager::validate_name(&profile.name)?;
+        validation::validate_opts(&profile.nfqws_opts)?;
+
+        self.config.nfqws2_opt = profile.nfqws_opts.clone();
+        self.config.current_profile = Some(profile.name.clone());
+
+        // Preserve any running child/log channel; only refresh derived config.
+        self.daemon.apply_config(&self.config);
+        self.firewall = firewall::FirewallManager::new(&self.config);
+
+        tracing::info!("applied profile '{}'", profile.name);
+        Ok(())
+    }
+
+    /// The currently active profile name, if any.
+    pub fn current_profile(&self) -> Option<&str> {
+        self.config.current_profile.as_deref()
+    }
+
+    /// Persist a profile to disk, going through the privilege executor.
+    ///
+    /// In direct mode the write runs in-process. In pkexec mode it delegates to
+    /// `pkexec zapret2-helper profile save …`, triggering polkit.
+    pub async fn save_profile(&self, profile: &profile::Profile) -> Result<()> {
+        use privilege::PrivilegedExecutor;
+        match self.mode {
+            privilege::ResolvedMode::Direct => actions::profile_save(&self.config, profile),
+            privilege::ResolvedMode::Pkexec => {
+                let ex = self.pkexec_executor();
+                ex.save_profile(profile).await
+            }
+        }
+    }
+
+    /// Remove a profile from disk, going through the privilege executor.
+    pub async fn remove_profile(&self, name: &str) -> Result<()> {
+        use privilege::PrivilegedExecutor;
+        match self.mode {
+            privilege::ResolvedMode::Direct => actions::profile_remove(&self.config, name),
+            privilege::ResolvedMode::Pkexec => {
+                let ex = self.pkexec_executor();
+                ex.remove_profile(name).await
+            }
+        }
     }
 }
 
@@ -153,4 +286,57 @@ pub struct Status {
     pub firewall_active: bool,
     /// Current profile name, if any.
     pub current_profile: Option<String>,
+}
+
+#[cfg(test)]
+mod controller_tests {
+    use super::*;
+    use crate::profile::Profile;
+
+    fn controller() -> ZapretController {
+        // A non-existent config path yields the default config without root.
+        ZapretController::new(Some(PathBuf::from("/nonexistent/zapret2/config"))).unwrap()
+    }
+
+    fn profile(name: &str, opts: &str) -> Profile {
+        Profile {
+            name: name.to_string(),
+            description: "test".to_string(),
+            strategy: "test".to_string(),
+            hostlists: vec![],
+            nfqws_opts: opts.to_string(),
+        }
+    }
+
+    #[test]
+    fn apply_profile_sets_active_profile_and_opts() {
+        let mut c = controller();
+        assert_eq!(c.current_profile(), None);
+
+        c.apply_profile(&profile("yt", "--qnum=300 --dpi-desync"))
+            .unwrap();
+
+        assert_eq!(c.current_profile(), Some("yt"));
+        assert_eq!(c.config().nfqws2_opt, "--qnum=300 --dpi-desync");
+    }
+
+    #[test]
+    fn apply_profile_rejects_invalid_name_without_mutating_state() {
+        let mut c = controller();
+        let original_opts = c.config().nfqws2_opt.clone();
+
+        assert!(c.apply_profile(&profile("../evil", "--qnum=200")).is_err());
+
+        assert_eq!(c.current_profile(), None);
+        assert_eq!(c.config().nfqws2_opt, original_opts);
+    }
+
+    #[test]
+    fn apply_profile_rejects_forbidden_opts_without_mutating_state() {
+        let mut c = controller();
+
+        assert!(c.apply_profile(&profile("ok", "--rm --force")).is_err());
+
+        assert_eq!(c.current_profile(), None);
+    }
 }

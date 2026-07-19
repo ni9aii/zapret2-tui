@@ -1,9 +1,9 @@
 //! zapret2-tui — Terminal UI for zapret2
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{self, Event, KeyEventKind},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
@@ -13,11 +13,35 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tracing::info;
+use zapret2_core::privilege::PrivilegeMode;
 
 mod app;
+mod logging;
+mod modal;
 mod ui;
 
 use app::App;
+
+/// How the TUI obtains the privileges needed for firewall/daemon control.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+enum PrivilegeModeArg {
+    /// Direct if already root, otherwise pkexec.
+    Auto,
+    /// Always use pkexec (polkit authentication).
+    Pkexec,
+    /// Never use pkexec (root/debug/server mode).
+    Direct,
+}
+
+impl From<PrivilegeModeArg> for PrivilegeMode {
+    fn from(arg: PrivilegeModeArg) -> Self {
+        match arg {
+            PrivilegeModeArg::Auto => PrivilegeMode::Auto,
+            PrivilegeModeArg::Pkexec => PrivilegeMode::Pkexec,
+            PrivilegeModeArg::Direct => PrivilegeMode::Direct,
+        }
+    }
+}
 
 /// Terminal UI for zapret2 DPI bypass
 #[derive(Parser)]
@@ -28,6 +52,10 @@ struct Args {
     /// Path to zapret2 config file
     #[arg(short, long, value_name = "FILE")]
     config: Option<PathBuf>,
+
+    /// How to obtain privileges for firewall/daemon control
+    #[arg(long, value_enum, default_value_t = PrivilegeModeArg::Auto)]
+    privilege_mode: PrivilegeModeArg,
 }
 
 #[tokio::main]
@@ -42,14 +70,27 @@ async fn main() -> Result<()> {
     })
     .map_err(|e| anyhow::anyhow!("Failed to set Ctrl+C handler: {}", e))?;
 
-    tracing_subscriber::fmt::init();
-    info!("starting zapret2-tui");
+    // Log to a file: the TUI owns the terminal, so stdout/stderr logging would
+    // corrupt the rendered UI. Warn (before taking the screen) if it fails.
+    match logging::init() {
+        Ok(path) => info!("starting zapret2-tui; logging to {}", path.display()),
+        Err(e) => eprintln!("zapret2-tui: file logging disabled ({e})"),
+    }
+
+    // Restore the terminal if a panic unwinds past the normal cleanup path so
+    // the shell is left in a usable state instead of stuck in raw/alternate mode.
+    let default_panic = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = disable_raw_mode();
+        let _ = stdout().execute(LeaveAlternateScreen);
+        default_panic(info);
+    }));
 
     stdout().execute(EnterAlternateScreen)?;
     enable_raw_mode()?;
 
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
-    let mut app = App::new(args.config)?;
+    let mut app = App::new(args.config, args.privilege_mode.into())?;
 
     let result = run_app(&mut terminal, &mut app, running).await;
 
@@ -76,32 +117,15 @@ async fn run_app(
 
         if crossterm::event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Char('Q') => {
-                            info!("quit requested");
-                            break;
-                        }
-                        KeyCode::Char('s') | KeyCode::Char('S') => {
-                            if let Err(e) = app.toggle_status().await {
-                                app.add_log(&format!("toggle error: {e}"));
-                            }
-                        }
-                        KeyCode::Char('r') | KeyCode::Char('R') => {
-                            if let Err(e) = app.restart().await {
-                                app.add_log(&format!("restart error: {e}"));
-                            }
-                        }
-                        KeyCode::Tab => app.next_tab(),
-                        KeyCode::BackTab => app.prev_tab(),
-                        _ => {}
-                    }
+                if key.kind == KeyEventKind::Press && app.handle_key(key.code).await? {
+                    info!("quit requested");
+                    break;
                 }
             }
         }
 
         if last_tick.elapsed() >= tick_rate {
-            app.update_status().await;
+            app.on_tick().await;
             last_tick = std::time::Instant::now();
         }
     }
