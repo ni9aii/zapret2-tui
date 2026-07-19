@@ -45,11 +45,11 @@ jobs:
         if: inputs.distro == 'ubuntu' || inputs.distro == 'debian'
         run: |
           apt-get update -qq
-          apt-get install -y -qq git curl
+          apt-get install -y -qq git curl build-essential
 
       - name: Install base tools (fedora)
         if: inputs.distro == 'fedora'
-        run: dnf install -y git curl
+        run: dnf install -y git curl gcc
 
       - uses: actions/checkout@v4
         with:
