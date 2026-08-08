@@ -51,7 +51,7 @@ toml = "0.8"
 clap = { version = "4", features = ["derive", "wrap_help"] }
 ctrlc = "3"
 ratatui = "0.30"
-crossterm = "0.28"
+crossterm = "0.29"
 chrono = "0.4"
 nix = { version = "0.31", features = ["process", "signal"] }
 zapret2-core = { path = "crates/zapret2-core" }
